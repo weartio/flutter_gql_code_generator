@@ -17,6 +17,16 @@ dev_dependencies:
       url: https://github.com/weartio/flutter_gql_code_generator.git
       ref: v1.1
 ```
+2.1- add configuration pubspec.yaml: e.g.:
+
+```
+flutter_gql_code_generator:
+  - packageName: 'project_gql_api'
+    packageDir: 'packages/project_gql_api'
+    inputDir: 'lib/graphql'
+    outputDir: 'lib/generated'
+    isNullSafety: true
+```
 3- add a script file `run_code_generation.sh` to run code generation, added it to the root of the project path:
 
 ```
@@ -28,11 +38,7 @@ path=`readlink -f "${BASH_SOURCE:-$0}"`
 DIR_PATH=`dirname $path`
 
 
-flutter pub run flutter_gql_code_generator \
- --packageName project_gql_api \
- --packageDir "${DIR_PATH}/packages/project_gql_api" \
- --inputDir lib/graphql \
- --outputDir lib/generated
+flutter pub run flutter_gql_code_generator
 
 # formatting the generated files to bypass CI errors.
 flutter format "${DIR_PATH}/packages/project_gql_api/lib/generated"
