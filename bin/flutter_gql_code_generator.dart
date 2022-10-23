@@ -1,35 +1,68 @@
-import 'package:args/args.dart';
+import 'dart:io';
+
+import 'package:yaml/yaml.dart' as yaml;
+
+import 'main.dart' as app;
 import 'src/generator.dart';
+import 'src/helpers.dart';
 
 void main(List<String> args) {
-  final parser = ArgParser();
-  parser.addOption('packageDir', abbr: 'd');
-  parser.addOption('packageName', abbr: 'p');
-  parser.addOption('inputDir', abbr: 'i');
-  parser.addOption('outputDir', abbr: 'o');
-  final results = parser.parse(args);
+  final yamlGenerators = loadConfig().toList();
+  if (yamlGenerators.isEmpty) {
+    app.main(args);
+  }
+  for (final gen in yamlGenerators) {
+    try {
+      gen.generate();
+    } catch (ex, trac) {
+      // ignore: avoid_print
+      print('Exception: $ex');
+      // ignore: avoid_print
+      print('Trace: \n$trac');
+    }
+  }
+}
 
-  final dynamic packageDir = results['packageDir'];
-  final dynamic packageName = results['packageName'];
-  final dynamic inputDir = results['inputDir'];
-  final dynamic outputDir = results['outputDir'];
-  if (inputDir == null || inputDir is! String) {
-    throw Exception('inputDir is mandatory');
+Iterable<Generator> loadConfig() sync* {
+  final file = File('pubspec.yaml');
+  if (!file.existsSync()) {
+    return;
   }
-  if (outputDir == null || outputDir is! String) {
-    throw Exception('outputDir is mandatory');
+  final yamlContent = file.readAsStringSync();
+  final dynamic mainYamlDoc = yaml.loadYaml(yamlContent);
+  final yml = safeCast<yaml.YamlMap>(mainYamlDoc);
+  if (yml == null) {
+    return;
   }
-  if (packageName == null || packageName is! String) {
-    throw Exception('packageName is mandatory');
+  final config = safeCast<yaml.YamlList>(yml['flutter_gql_code_generator']);
+  if (config == null || config.isEmpty) {
+    return;
   }
-  if (packageDir == null || packageDir is! String) {
-    throw Exception('packageDir is mandatory');
+  for (final item in config) {
+    final map = safeCast<yaml.YamlMap>(item);
+    if (map == null) {
+      continue;
+    }
+    final packageName = safeCast<String>(map['packageName']);
+    final packageDir = safeCast<String>(map['packageDir']);
+    final inputDir = safeCast<String>(map['inputDir']);
+    final outputDir = safeCast<String>(map['outputDir']);
+    final isNullSafety =
+        ['true', 'on', '1'].contains(map['isNullSafety']?.toString() ?? '');
+    if ( //
+        packageName == null || //
+            packageDir == null || //
+            inputDir == null || //
+            outputDir == null //
+        ) {
+      continue;
+    }
+    yield Generator(
+      packageName: packageName,
+      packageDir: packageDir,
+      inputDir: inputDir,
+      outputDir: outputDir,
+      isNullSafety: isNullSafety,
+    );
   }
-  Generator(
-    packageName: packageName,
-    packageDir: packageDir,
-    inputDir: inputDir,
-    outputDir: outputDir,
-    isNullSafety: true,
-  ).generate();
 }
