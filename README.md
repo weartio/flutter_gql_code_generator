@@ -1,2 +1,4 @@
-# flutter_graphQL_generator
-flutter graph ql code generator
+# flutter_gql_code_generator
+Graph QL Code Generator for dart/flutter projects
+
+
