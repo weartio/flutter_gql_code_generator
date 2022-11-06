@@ -8,6 +8,12 @@ Graph QL Code Generator for dart/flutter projects
 add a sub package to manage the output of the generated code.
 say for example: `project_gql_api`, in a sub folder named: `packages`
 
+```
+# inside the root folder of the project
+mkdir packages && cd packages
+flutter create --template=package ./project_gql_api
+```
+
 2- add to dev deps:
 ```
 dev_dependencies:
