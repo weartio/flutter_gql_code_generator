@@ -59,6 +59,17 @@ enum FixNameTarget {
   memberDecl,
 }
 
+extension on FixNameTarget {
+  String get keywordEscapeSuffix {
+    switch (this) {
+      case FixNameTarget.memberDecl:
+        return 'Member';
+      case FixNameTarget.typeDecl:
+        return 'Type';
+    }
+  }
+}
+
 extension FixName on String {
   String fixName(MemberType target) {
     switch (target) {
@@ -115,16 +126,17 @@ extension FixName on String {
       }
     }
     push();
+    final suffix = target.keywordEscapeSuffix;
     if (target == FixNameTarget.typeDecl) {
-      return parts.map((p) => p.capitalize()).join().escapeKeyWords();
+      return parts.map((p) => p.capitalize()).join().escapeKeyWords(suffix);
     } else {
       return (parts.first.toLowerCase() +
               parts.sublist(1).map((p) => p.capitalize()).join())
-          .escapeKeyWords();
+          .escapeKeyWords(suffix);
     }
   }
 
-  String escapeKeyWords() {
+  String escapeKeyWords(String suffix) {
     //https://docs.swift.org/swift-book/ReferenceManual/LexicalStructure.html#:~:text=Keywords%20reserved%20in%20particular%20contexts,unowned%20%2C%20weak%20%2C%20and%20willSet%20.
     final decls = [
       'associatedtype',
@@ -192,7 +204,7 @@ extension FixName on String {
     ];
 
     if ([decls, statements, expAndTypes].any((e) => e.contains(this))) {
-      return '`$this`';
+      return '${this}$suffix';
     }
     return this;
   }
