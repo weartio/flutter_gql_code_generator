@@ -109,6 +109,7 @@ class GraphQLResponse<T> {
     required T? Function(dynamic) dataParser,
   }) {
     if (value is String) {
+      // parse json and try again using recursing
       return fromDynamic(
         jsonDecode(value),
         resultName: resultName,
