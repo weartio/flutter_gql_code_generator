@@ -21,7 +21,7 @@ dev_dependencies:
   flutter_gql_code_generator:
     git:
       url: https://github.com/weartio/flutter_gql_code_generator.git
-      ref: v1.2
+      ref: v1.5
 ```
 2.1- add configuration pubspec.yaml: e.g.:
 

@@ -59,6 +59,17 @@ enum FixNameTarget {
   memberDecl,
 }
 
+extension on FixNameTarget {
+  String get keywordEscapeSuffix {
+    switch (this) {
+      case FixNameTarget.memberDecl:
+        return 'Member';
+      case FixNameTarget.typeDecl:
+        return 'Type';
+    }
+  }
+}
+
 extension FixName on String {
   String fixName(MemberType target) {
     switch (target) {
@@ -116,83 +127,108 @@ extension FixName on String {
     }
     push();
     if (target == FixNameTarget.typeDecl) {
-      return parts.map((p) => p.capitalize()).join().escapeKeyWords();
+      return parts.map((p) => p.capitalize()).join().escapeKeyWords(target);
     } else {
       return (parts.first.toLowerCase() +
               parts.sublist(1).map((p) => p.capitalize()).join())
-          .escapeKeyWords();
+          .escapeKeyWords(target);
     }
   }
 
-  String escapeKeyWords() {
-    //https://docs.swift.org/swift-book/ReferenceManual/LexicalStructure.html#:~:text=Keywords%20reserved%20in%20particular%20contexts,unowned%20%2C%20weak%20%2C%20and%20willSet%20.
-    final decls = [
-      'associatedtype',
-      'class',
-      'deinit',
-      'enum',
-      'extension',
-      'fileprivate',
-      'func',
-      'import',
-      'init',
-      'inout',
-      'internal',
-      'let',
-      'open',
-      'operator',
-      'private',
-      'precedencegroup',
-      'protocol',
-      'public',
-      'rethrows',
-      'static',
-      'struct',
-      'subscript',
-      'typealias',
-      'var'
-    ];
-    final statements = [
-      'break',
-      'case',
-      'catch',
-      'continue',
-      'default',
-      'defer',
-      'do',
-      'else',
-      'fallthrough',
-      'for',
-      'guard',
-      'if',
-      'in',
-      'repeat',
-      'return',
-      'throw',
-      'switch',
-      'where',
-      'and',
-      'while',
-    ];
-    final expAndTypes = [
-      'Any',
-      'as',
-      'catch',
-      'false',
-      'is',
-      'nil',
-      'rethrows',
-      'self',
-      'Self',
-      'super',
-      'throw',
-      'throws',
-      'true',
-      'try',
+  String escapeKeyWords(FixNameTarget target) {
+    //https://dart.dev/guides/language/language-tour
+
+    //Words with the superscript 1 are contextual keywords, which have meaning
+    // only in specific places. They’re valid identifiers everywhere.
+    const c1 = [
+      'show',
+      'async',
+      'sync',
+      'on',
+      'hide',
     ];
 
-    if ([decls, statements, expAndTypes].any((e) => e.contains(this))) {
-      return '`$this`';
+    //Words with the superscript 2 are built-in identifiers. These keywords are
+    //valid identifiers in most places, but they can’t be used as class or type
+    //names, or as import prefixes.
+    const c2 = [
+      'abstract',
+      'import',
+      'as',
+      'static',
+      'export',
+      'interface',
+      'extension',
+      'late',
+      'external',
+      'library',
+      'factory',
+      'mixin',
+      'typedef',
+      'operator',
+      'covariant',
+      'Function',
+      'part',
+      'get',
+      'required',
+      'deferred',
+      'dynamic',
+      'implements',
+      'set'
+    ];
+
+    //Words with the superscript 3 are limited reserved words related to
+    //asynchrony support. You can’t use await or yield as an identifier in any
+    //function body marked with async, async*, or sync*.
+    const c3 = [
+      'await',
+      'yield',
+    ];
+
+    //All other words in the table are reserved words, which can’t be identifiers.
+    const cOther = [
+      'else',
+      'enum',
+      'in',
+      'assert',
+      'super',
+      'extends',
+      'is',
+      'switch',
+      'break',
+      'this',
+      'case',
+      'throw',
+      'catch',
+      'false',
+      'new',
+      'true',
+      'class',
+      'final',
+      'null',
+      'try',
+      'const',
+      'finally',
+      'continue',
+      'for',
+      'var',
+      'void',
+      'default',
+      'while',
+      'rethrow',
+      'with',
+      'do',
+      'if',
+      'return',
+    ];
+
+    final needEscaping = cOther.contains(this) ||
+        c1.contains(this) ||
+        (c2.contains(this) && target == FixNameTarget.typeDecl) ||
+        (c3.contains(this) && target == FixNameTarget.memberDecl);
+
+    if (needEscaping) {
+      return '${this}${target.keywordEscapeSuffix}';
     }
     return this;
   }
