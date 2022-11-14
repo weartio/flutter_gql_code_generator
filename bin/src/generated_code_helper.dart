@@ -108,11 +108,21 @@ class GraphQLResponse<T> {
     required String resultName,
     required T? Function(dynamic) dataParser,
   }) {
-    return fromMap(
-      safeCast<Map<String, dynamic>>(value),
-      resultName: resultName,
-      dataParser: dataParser,
-    );
+    if (value is String) {
+      return fromDynamic(
+        jsonDecode(value),
+        resultName: resultName,
+        dataParser: dataParser,
+      );
+    } else if (value is Map<String, dynamic>) {
+      return fromMap(
+        value,
+        resultName: resultName,
+        dataParser: dataParser,
+      );
+    }
+    // TODO(team): should we just throw an error & make the result none nullable
+    return null;
   }
 
   static GraphQLResponse<T>? fromMap<T>(
