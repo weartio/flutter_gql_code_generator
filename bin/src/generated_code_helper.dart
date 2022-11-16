@@ -1,5 +1,7 @@
 String get generatedCodeHelper {
   return r'''
+import 'dart:convert';
+
 extension MapParserHelper on Map<String, dynamic> {
   T? tryParse<T>(String name, T? Function(dynamic) parser) {
     final dynamic value = this[name];
