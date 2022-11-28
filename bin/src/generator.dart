@@ -838,8 +838,8 @@ class Generator {
         }
 
         code.writeLine('@override');
-        code.writeLine(
-            "List<String> get operationNames => ['${operation.queryNames.join(',')}'];");
+        final mappedNames = operation.queryNames.map((e) => "'$e'").join(',');
+        code.writeLine('List<String> get operationNames => [$mappedNames];');
 
         code.writeLine();
         code.writeLine('@override');
