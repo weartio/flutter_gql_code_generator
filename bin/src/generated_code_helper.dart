@@ -81,7 +81,7 @@ T? safeCast<T>(dynamic value) {
 
 abstract class BaseRequest<TResult> {
   String get operation;
-  String get operationName;
+  List<String> get operationNames;
   Map<String, dynamic> get inputs;
   TResult? parseResult(dynamic value);
 }
@@ -90,7 +90,7 @@ extension BaseRequestResultParser<T> on BaseRequest<T> {
   GraphQLResponse<T>? parseResponse(dynamic value) {
     return GraphQLResponse.fromDynamic(
       value,
-      resultName: operationName,
+      resultNames: operationNames,
       dataParser: parseResult,
     );
   }
@@ -107,20 +107,20 @@ class GraphQLResponse<T> {
 
   static GraphQLResponse<T>? fromDynamic<T>(
     dynamic value, {
-    required String resultName,
+    required List<String> resultNames,
     required T? Function(dynamic) dataParser,
   }) {
     if (value is String) {
       // parse json and try again using recursing
       return fromDynamic(
         jsonDecode(value),
-        resultName: resultName,
+        resultNames: resultNames,
         dataParser: dataParser,
       );
     } else if (value is Map<String, dynamic>) {
       return fromMap(
         value,
-        resultName: resultName,
+        resultNames: resultNames,
         dataParser: dataParser,
       );
     }
@@ -130,16 +130,23 @@ class GraphQLResponse<T> {
 
   static GraphQLResponse<T>? fromMap<T>(
     Map<String, dynamic>? map, {
-    required String resultName,
+    required List<String> resultNames,
     required T? Function(dynamic) dataParser,
   }) {
     if (map == null) {
       return null;
     }
-    final dataMap = safeCast<Map<String, dynamic>>(map['data']);
-
+    final single = resultNames.singleOrNull;
+    T? result;
+    final dynamic data = map['data'];
+    if (single != null) {
+      final dataMap = safeCast<Map<String, dynamic>>(data);
+      result = dataMap?.tryParse(single, dataParser);
+    } else {
+      result = dataParser(data);
+    }
     return GraphQLResponse(
-      data: dataMap?.tryParse(resultName, dataParser),
+      data: result,
       errors: map.tryParse(
         'errors',
         arrayParser(
@@ -216,6 +223,26 @@ class GraphQLErrorLocation {
       line: value.tryParse('line', tryParseInt),
       column: value.tryParse('column', tryParseInt),
     );
+  }
+}
+
+extension<T> on Iterable<T> {
+  T? get firstOrNull {
+    for (final element in this) {
+      return element;
+    }
+    return null;
+  }
+
+  T? get singleOrNull {
+    T? value;
+    for (final element in this) {
+      if (value != null) {
+        return null;
+      }
+      value = element;
+    }
+    return value;
   }
 }
 
