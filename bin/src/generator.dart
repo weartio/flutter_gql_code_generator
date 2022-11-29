@@ -13,6 +13,7 @@ import 'operation_info.dart';
 import 'primitive_types.dart';
 import 'query_input.dart';
 import 'string_extensions.dart';
+import 'type_info.dart';
 import 'uri_extensions.dart';
 
 class Generator {
@@ -88,7 +89,7 @@ class Generator {
     File(path).writeAsStringSync(generatedCodeHelper);
   }
 
-  gql.FieldDefinitionNode findOperation(OperationInfo info) {
+  Map<String, gql.FieldDefinitionNode> findOperation(OperationInfo info) {
     final key =
         (info.type == gql.OperationType.mutation) ? 'Mutation' : 'Query';
     final group = schemeTypeDefinitions[key];
@@ -97,12 +98,15 @@ class Generator {
         keySelector: (e) => e.name.value,
         valueSelector: (e) => e,
       );
-      final operation = mapped[info.queryName];
-      if (operation == null) {
-        throw Exception(
-            'operation ${info.queryName} is not defined in the schema.');
+      final result = <String, gql.FieldDefinitionNode>{};
+      for (final name in info.queryNames) {
+        final operation = mapped[name];
+        if (operation == null) {
+          throw Exception('operation $name is not defined in the schema.');
+        }
+        result[name] = operation;
       }
-      return operation;
+      return result;
     } else {
       throw Exception('un supported type for $key operation list type.');
     }
@@ -116,8 +120,10 @@ class Generator {
     for (final input in initalInputs) {
       _referencedInputOutputTypes(input, allTypes);
     }
-    final initalOutputs =
-        queries.map((e) => e.outputType).map((e) => e.type).distinct();
+    final initalOutputs = queries
+        .flatMap((e) => e.outputTypes.entries)
+        .map((e) => e.value.type)
+        .distinct();
 
     for (final input in initalOutputs) {
       _referencedInputOutputTypes(input, allTypes);
@@ -297,10 +303,14 @@ class Generator {
       throw Exception('definition $name not found in the schema.');
     }
     final fixed = fixName(def.name.value, def.memberType);
+    return getDefPathForResolvedType(fixed, subFolder);
+  }
+
+  String getDefPathForResolvedType(String name, String subFolder) {
     final dir = joinPath([packageDir, outputDir, subFolder]);
     tryCreateDir(dir);
-    addExported(subFolder, fixed + '.dart');
-    return joinPath([dir, fixed + '.dart']);
+    addExported(subFolder, name + '.dart');
+    return joinPath([dir, name + '.dart']);
   }
 
   var exportedList = <String>[];
@@ -733,6 +743,25 @@ class Generator {
     }
   }
 
+  void _generateAggregateOperationResultType(
+      String resultName, Map<String, TypeInfo> subTypes) {
+    final path = getDefPathForResolvedType(resultName, 'AggregateOutputModels');
+    generateClass(
+      path,
+      resultName,
+      subTypes.entries
+          .map(
+            (e) => FieldInfo(
+              name: e.key,
+              type: e.value.type,
+            ),
+          )
+          .toList(),
+      [],
+      MemberType.outputModel,
+    );
+  }
+
   void _generateOperation(OperationInfo operation) {
     final fileName = fixName(
       Uri.file(operation.filePath).fileNameWithoutExtension,
@@ -747,9 +776,21 @@ class Generator {
     writeImports(code);
     //final opName = fixName(operation.queryName, operation.memberType);
 
-    final noneNullOutputName =
-        _mapType(operation.outputType.type, addNullCheck: false);
-    final outputName = _mapType(operation.outputType.type);
+    final String noneNullOutputName;
+    final String outputName;
+    final String typeParser;
+    if (operation.outputTypes.length == 1) {
+      final type = operation.outputTypes.entries.first.value.type;
+      noneNullOutputName = _mapType(type, addNullCheck: false);
+      outputName = _mapType(type);
+      typeParser = _getTypeParser(type);
+    } else {
+      final name = '${fileName}OutputModel';
+      _generateAggregateOperationResultType(name, operation.outputTypes);
+      noneNullOutputName = name;
+      outputName = '$name?';
+      typeParser = '$name.fromDynamic';
+    }
 
     code.writeBlock(
       start: 'class $fileName implements BaseRequest<$noneNullOutputName>',
@@ -797,7 +838,8 @@ class Generator {
         }
 
         code.writeLine('@override');
-        code.writeLine("String get operationName => '${operation.queryName}';");
+        final mappedNames = operation.queryNames.map((e) => "'$e'").join(',');
+        code.writeLine('List<String> get operationNames => [$mappedNames];');
 
         code.writeLine();
         code.writeLine('@override');
@@ -835,7 +877,7 @@ class Generator {
           start: '$outputName parseResult(dynamic value)',
           write: (code) {
             code.write('return ');
-            code.write(_getTypeParser(operation.outputType.type));
+            code.write(typeParser);
             code.writeLine('(value);');
           },
         );
@@ -878,24 +920,23 @@ class Generator {
           ),
         );
       }
-      if (def.selectionSet.selections.length != 1) {
-        throw Exception(
-            'Only one selection per query is supported: file: ${item.path}');
-      }
 
-      final selectedQuery = def.selectionSet.selections.first;
-      if (selectedQuery is gql.FieldNode) {
-        final name = selectedQuery.name.value;
-        return OperationInfo(
-          item.path,
-          name,
-          namedInputs,
-          def.type,
-        );
-      } else {
-        throw Exception(
-            'unsupported selection type: ${def.runtimeType}, file: ${item.path}');
+      final names = <String>[];
+      for (final selectedQuery in def.selectionSet.selections) {
+        if (selectedQuery is gql.FieldNode) {
+          final name = selectedQuery.name.value;
+          names.add(name);
+        } else {
+          throw Exception(
+              'unsupported selection type: ${def.runtimeType}, file: ${item.path}');
+        }
       }
+      return OperationInfo(
+        item.path,
+        names,
+        namedInputs,
+        def.type,
+      );
     } else {
       throw Exception(
           'unsupported operation node type: ${def.runtimeType}, file: ${item.path}');

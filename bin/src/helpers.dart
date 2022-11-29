@@ -16,3 +16,13 @@ T? safeCast<T>(dynamic value) {
   }
   return null;
 }
+
+extension IterableExtensions<T> on Iterable<T> {
+  Iterable<TR> flatMap<TR>(Iterable<TR> Function(T) mapper) sync* {
+    for (final item in this) {
+      for (final subItem in mapper(item)) {
+        yield subItem;
+      }
+    }
+  }
+}

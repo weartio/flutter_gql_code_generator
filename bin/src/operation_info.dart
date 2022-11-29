@@ -7,12 +7,12 @@ import 'type_info.dart';
 class OperationInfo {
   OperationInfo(
     this.filePath,
-    this.queryName,
+    this.queryNames,
     this.inputs,
     this.type,
   );
   final String filePath;
-  final String queryName;
+  final List<String> queryNames;
   final List<QueryInput> inputs;
   final gql.OperationType type;
   MemberType get memberType {
@@ -26,16 +26,18 @@ class OperationInfo {
     }
   }
 
-  late TypeInfo outputType;
+  late Map<String, TypeInfo> outputTypes;
 
   void resolveOutput(Generator generator) {
     final operation = generator.findOperation(this);
-
-    final operationType = operation.type;
-
-    outputType = TypeInfo(
-      type: operationType,
-      isNoneNull: operation.type.isNonNull,
-    );
+    final result = <String, TypeInfo>{};
+    for (final item in operation.entries) {
+      final operationType = item.value.type;
+      result[item.key] = TypeInfo(
+        type: operationType,
+        isNoneNull: item.value.type.isNonNull,
+      );
+    }
+    outputTypes = result;
   }
 }
