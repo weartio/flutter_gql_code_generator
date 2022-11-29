@@ -227,13 +227,6 @@ class GraphQLErrorLocation {
 }
 
 extension<T> on Iterable<T> {
-  T? get firstOrNull {
-    for (final element in this) {
-      return element;
-    }
-    return null;
-  }
-
   T? get singleOrNull {
     T? value;
     for (final element in this) {
