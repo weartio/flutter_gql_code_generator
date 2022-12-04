@@ -207,10 +207,12 @@ class GraphQLError {
 }
 
 class GraphQLErrorLocation {
-  GraphQLErrorLocation({this.line, this.column});
+  GraphQLErrorLocation({this.raw = const <String, dynamic>{}});
+  final Map<String, dynamic> raw;
 
-  final int? line;
-  final int? column;
+  int? get line => raw.tryParse('line', tryParseInt);
+  int? get column => raw.tryParse('column', tryParseInt);
+
   static GraphQLErrorLocation? fromDynamic(dynamic value) {
     return fromMap(safeCast<Map<String, dynamic>>(value));
   }
@@ -219,21 +221,21 @@ class GraphQLErrorLocation {
     if (value == null) {
       return null;
     }
-    return GraphQLErrorLocation(
-      line: value.tryParse('line', tryParseInt),
-      column: value.tryParse('column', tryParseInt),
-    );
+    return GraphQLErrorLocation(raw: value);
   }
+
+  bool containsValue(dynamic value) => raw.containsValue(value);
+
+  bool containsKey(String key) => raw.containsKey(key);
+
+  dynamic operator [](String key) => raw[key];
+
+  void operator []=(String key, dynamic value) => raw[key] = value;
+
+  Iterable<MapEntry<String, dynamic>> get entries => raw.entries;
 }
 
 extension<T> on Iterable<T> {
-  T? get firstOrNull {
-    for (final element in this) {
-      return element;
-    }
-    return null;
-  }
-
   T? get singleOrNull {
     T? value;
     for (final element in this) {
