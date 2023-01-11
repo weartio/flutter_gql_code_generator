@@ -695,7 +695,7 @@ class Generator {
 
   String? _findFieldAliase(List<gql.DirectiveNode> directives) {
     return safeCast<gql.StringValueNode>(directives
-            .firstWhereOrNull((e) => e.name.value == 'custom_aliase')
+            .firstWhereOrNull((e) => e.name.value == 'custom_alias')
             ?.arguments
             .firstWhereOrNull((e) => e.name.value == 'name')
             ?.value)
