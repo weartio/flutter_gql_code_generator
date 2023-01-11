@@ -364,7 +364,7 @@ class Generator {
   ) {
     final type = field.type;
     writer
-      ..write(fixName(field.name, MemberType.field))
+      ..write(fixName(field.codeGenName, MemberType.field))
       ..write(_serlizerTypeMapping(type) ?? '');
   }
 
@@ -465,7 +465,7 @@ class Generator {
                 }
                 writer
                   ..write('this.')
-                  ..write(fixName(field.name, MemberType.field));
+                  ..write(fixName(field.codeGenName, MemberType.field));
 
                 final defaultValue = field.defaultValue;
                 if (defaultValue != null && defaultValue is! NullDefaultValue) {
@@ -488,7 +488,7 @@ class Generator {
             ..write('final ')
             ..write(_mapType(type))
             ..write(' ')
-            ..write(fixName(field.name, MemberType.field))
+            ..write(fixName(field.codeGenName, MemberType.field))
             ..writeLine(';');
         }
         final nullCheck = isNullSafety ? '?' : '';
@@ -523,7 +523,7 @@ class Generator {
               closer: ');',
               write: (writer) {
                 for (final field in fields) {
-                  writer.write(fixName(field.name, MemberType.field));
+                  writer.write(fixName(field.codeGenName, MemberType.field));
                   writer.write(': ');
                   _writeFieldParser(
                     writer,
@@ -693,6 +693,15 @@ class Generator {
     }
   }
 
+  String? _findFieldAliase(List<gql.DirectiveNode> directives) {
+    return safeCast<gql.StringValueNode>(directives
+            .firstWhereOrNull((e) => e.name.value == 'custom_aliase')
+            ?.arguments
+            .firstWhereOrNull((e) => e.name.value == 'name')
+            ?.value)
+        ?.value;
+  }
+
   void _generateInputOutput(String name) {
     final def = schemeTypeDefinitions[name];
     if (def == null) {
@@ -708,6 +717,7 @@ class Generator {
               (e) => FieldInfo(
                 name: e.name.value,
                 type: e.type,
+                aliase: _findFieldAliase(e.directives),
               ),
             )
             .toList(),
@@ -723,6 +733,7 @@ class Generator {
               (e) => FieldInfo(
                 name: e.name.value,
                 type: e.type,
+                aliase: _findFieldAliase(e.directives),
                 defaultValue: _mapDefaultValue(
                   e.defaultValue,
                   e.type,
