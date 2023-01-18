@@ -260,14 +260,14 @@ extension<T> on Iterable<T> {
 
 class FragmentDef {
   FragmentDef({
-    required this.fragmentAlias,
-    required this.fragmentRefs,
-    required this.fragmentBody,
+    required this.name,
+    required this.refs,
+    required this.code,
   });
 
-  final List<String> fragmentRefs;
-  final String fragmentAlias;
-  final String fragmentBody;
+  final List<String> refs;
+  final String name;
+  final String code;
 }
 
 
@@ -289,7 +289,7 @@ Iterable<String> findReferencedFragments(
 ]) sync* {
   for (final ref in Set<String>.from(refs)) {
     final localDef = localFragments.firstWhereOrNull(
-      (e) => e.fragmentAlias == ref,
+      (e) => e.name == ref,
     );
     final isLocal = localDef != null;
     final isGlobal = !isLocal;
@@ -301,17 +301,17 @@ Iterable<String> findReferencedFragments(
       continue;
     }
     if (isLocal) {
-      yield localDef.fragmentBody;
+      yield localDef.code;
       continue;
     }
     for (final file in fragmentFiles) {
       final def = file.defs.firstWhereOrNull(
-        (e) => e.fragmentAlias == ref,
+        (e) => e.name == ref,
       );
       if (def == null) {
         continue;
       }
-      final innerRefs = file.refMap[def.fragmentAlias];
+      final innerRefs = file.refMap[def.name];
       if (innerRefs != null) {
         yield* findReferencedFragments(
           innerRefs,

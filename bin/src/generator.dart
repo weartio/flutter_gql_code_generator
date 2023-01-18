@@ -40,8 +40,11 @@ class Generator {
         .listSync()
         .orderBy((a, b) => a.path.compareTo(b.path))
         .where((element) => File(element.path).existsSync())
-        .where((e) =>
-            ['graphql', 'gql'].contains(e.uri.fileExtension.toLowerCase()));
+        .where(
+          (e) => ['graphql', 'gql'].contains(
+            e.uri.fileExtension.toLowerCase(),
+          ),
+        );
 
     final schemePath = inputItems
         .firstWhere((e) => e.uri.fileName.toLowerCase() == 'schema.graphql')
@@ -118,19 +121,21 @@ class Generator {
                             closer: '),',
                             write: (code) {
                               code.writeLine(
-                                  "fragmentAlias: '${def.fragmentAlias}',");
+                                "name: '${def.name}',",
+                              );
                               code.writeBlock(
-                                start: 'fragmentRefs:',
+                                start: 'refs:',
                                 opener: '[',
                                 closer: '],',
                                 write: (code) {
-                                  for (final ref in def.fragmentRefs) {
+                                  for (final ref in def.refs) {
                                     code.writeLine("'$ref',");
                                   }
                                 },
                               );
                               code.writeLine(
-                                  "fragmentBody: r'''\n${def.fragmentBody}\n''',");
+                                "code: r'''\n${def.code}\n''',",
+                              );
                             },
                           );
                         }
@@ -1046,9 +1051,9 @@ class Generator {
 
   FragmentDef _convertFramentDef(gql.FragmentDefinitionNode def) {
     return FragmentDef(
-      fragmentAlias: def.name.value,
-      fragmentBody: gql.printNode(def),
-      fragmentRefs: _findReferencedFragments(def).toList(),
+      name: def.name.value,
+      code: gql.printNode(def),
+      refs: _findReferencedFragments(def).toList(),
     );
   }
 

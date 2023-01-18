@@ -36,13 +36,13 @@ class OperationInfo {
 
   List<String> get directOperationFragmentRefsExternal {
     return directOperationFragmentRefs
-        .where((ref) => !fragmetDefs.any((def) => def.fragmentAlias == ref))
+        .where((ref) => !fragmetDefs.any((def) => def.name == ref))
         .toList();
   }
 
   List<String> get directOperationFragmentRefsInternal {
     return directOperationFragmentRefs
-        .where((ref) => fragmetDefs.any((def) => def.fragmentAlias == ref))
+        .where((ref) => fragmetDefs.any((def) => def.name == ref))
         .toList();
   }
 

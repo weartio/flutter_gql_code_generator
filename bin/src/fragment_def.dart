@@ -1,11 +1,11 @@
 class FragmentDef {
   FragmentDef({
-    required this.fragmentAlias,
-    required this.fragmentRefs,
-    required this.fragmentBody,
+    required this.name,
+    required this.refs,
+    required this.code,
   });
 
-  final List<String> fragmentRefs;
-  final String fragmentAlias;
-  final String fragmentBody;
+  final List<String> refs;
+  final String name;
+  final String code;
 }
