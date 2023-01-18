@@ -1,16 +1,19 @@
 import 'package:gql/ast.dart' as gql;
+import 'fragment_def.dart';
 import 'generator.dart';
 import 'member_type.dart';
 import 'query_input.dart';
 import 'type_info.dart';
 
 class OperationInfo {
-  OperationInfo(
-    this.filePath,
-    this.queryNames,
-    this.inputs,
-    this.type,
-  );
+  OperationInfo({
+    required this.filePath,
+    required this.queryNames,
+    required this.inputs,
+    required this.type,
+    required this.fragmetDefs,
+    required this.directOperationFragmentRefs,
+  });
   final String filePath;
   final List<String> queryNames;
   final List<QueryInput> inputs;
@@ -27,6 +30,21 @@ class OperationInfo {
   }
 
   late Map<String, TypeInfo> outputTypes;
+
+  final List<FragmentDef> fragmetDefs;
+  final List<String> directOperationFragmentRefs;
+
+  List<String> get directOperationFragmentRefsExternal {
+    return directOperationFragmentRefs
+        .where((ref) => !fragmetDefs.any((def) => def.fragmentAlias == ref))
+        .toList();
+  }
+
+  List<String> get directOperationFragmentRefsInternal {
+    return directOperationFragmentRefs
+        .where((ref) => fragmetDefs.any((def) => def.fragmentAlias == ref))
+        .toList();
+  }
 
   void resolveOutput(Generator generator) {
     final operation = generator.findOperation(this);

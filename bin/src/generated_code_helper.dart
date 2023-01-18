@@ -1,6 +1,7 @@
 String get generatedCodeHelper {
   return r'''
 import 'dart:convert';
+import 'fragment_defs.dart';
 
 extension MapParserHelper on Map<String, dynamic> {
   T? tryParse<T>(String name, T? Function(dynamic) parser) {
@@ -246,7 +247,82 @@ extension<T> on Iterable<T> {
     }
     return value;
   }
+
+  T? firstWhereOrNull(bool Function(T) predicate) {
+    for (final item in this) {
+      if (predicate(item)) {
+        return item;
+      }
+    }
+    return null;
+  }
 }
 
+class FragmentDef {
+  FragmentDef({
+    required this.fragmentAlias,
+    required this.fragmentRefs,
+    required this.fragmentBody,
+  });
+
+  final List<String> fragmentRefs;
+  final String fragmentAlias;
+  final String fragmentBody;
+}
+
+
+class FragmentFile {
+  FragmentFile({
+    required this.defs,
+    required this.refMap,
+  });
+
+  final List<FragmentDef> defs;
+  final Map<String, List<String>> refMap;
+}
+
+Iterable<String> findReferencedFragments(
+  List<String> refs, [
+  List<FragmentDef> localFragments = const [],
+  bool skipLocals = true,
+  Set<String> traversedCache = const {},
+]) sync* {
+  for (final ref in Set<String>.from(refs)) {
+    final localDef = localFragments.firstWhereOrNull(
+      (e) => e.fragmentAlias == ref,
+    );
+    final isLocal = localDef != null;
+    final isGlobal = !isLocal;
+    if (skipLocals && isLocal) {
+      continue;
+    }
+    final isTraversed = !traversedCache.add(ref);
+    if (isTraversed && isGlobal) {
+      continue;
+    }
+    if (isLocal) {
+      yield localDef.fragmentBody;
+      continue;
+    }
+    for (final file in fragmentFiles) {
+      final def = file.defs.firstWhereOrNull(
+        (e) => e.fragmentAlias == ref,
+      );
+      if (def == null) {
+        continue;
+      }
+      final innerRefs = file.refMap[def.fragmentAlias];
+      if (innerRefs != null) {
+        yield* findReferencedFragments(
+          innerRefs,
+          file.defs,
+          false,
+          traversedCache,
+        );
+      }
+      break;
+    }
+  }
+}
 ''';
 }

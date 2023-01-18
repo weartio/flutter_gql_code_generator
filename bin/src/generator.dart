@@ -4,6 +4,9 @@ import 'package:gql/language.dart' as gql;
 import 'code_writer.dart';
 import 'default_value.dart';
 import 'field_info.dart';
+import 'fragment_def.dart';
+import 'fragment_file.dart';
+import 'fragment_spread_nodes_finder.dart';
 import 'generated_code_helper.dart';
 import 'gql_node_extensions.dart';
 import 'helpers.dart';
@@ -43,9 +46,16 @@ class Generator {
     final schemePath = inputItems
         .firstWhere((e) => e.uri.fileName.toLowerCase() == 'schema.graphql')
         .path;
-    final queryFiles = inputItems
-        .where((e) => e.uri.fileName.toLowerCase() != 'schema.graphql');
-
+    final queryFiles = inputItems.where(
+      (e) =>
+          e.uri.fileName.toLowerCase() != 'schema.graphql' &&
+          !e.uri.fileName.toLowerCase().startsWith('fragment.'),
+    );
+    final fragmentFiles = inputItems
+        .where(
+          (e) => e.uri.fileName.toLowerCase().startsWith('fragment.'),
+        )
+        .toList();
     schema = parseGQLFile(schemePath);
     schemeTypeDefinitions = schema.definitions
         .whereType<gql.TypeDefinitionNode>()
@@ -59,12 +69,120 @@ class Generator {
     for (final query in queries) {
       query.resolveOutput(this);
     }
+    final fragmentFilesDefs = fragmentFiles.map(_readFragmentsFile).toList();
 
     final allTypes = _findAllInputsAndOutputs(queries).toList();
     allTypes.forEach(_generateInputOutput);
     queries.forEach(_generateOperation);
+    _writeFragmentDefsFile(fragmentFilesDefs);
     _writeExported();
     _writeHelper();
+  }
+
+  void _writeFragmentDefsFile(List<FragmentFile> files) {
+    final path = joinPath([packageDir, outputDir, 'fragment_defs.dart']);
+    final code = CodeWriter();
+    final mapped = exportedList.map((e) {
+      if (e.startsWith('/')) {
+        return e.substring(1);
+      }
+      return e;
+    }).toList();
+    mapped.sort((a, b) => a.compareTo(b));
+
+    code.writeLine("import 'helper.dart';");
+    code.writeLine('List<FragmentFile>? _fragmentFiles;');
+    code.writeBlock(
+        start: 'List<FragmentFile> get fragmentFiles',
+        write: (code) {
+          code.writeBlock(
+            start: 'return _fragmentFiles ??=',
+            opener: '[',
+            closer: '];',
+            write: (code) {
+              for (final file in files) {
+                code.writeBlock(
+                  start: 'FragmentFile',
+                  opener: '(',
+                  closer: '),',
+                  write: (code) {
+                    code.writeBlock(
+                      start: 'defs:',
+                      opener: '[',
+                      closer: '],',
+                      write: (code) {
+                        for (final def in file.defs) {
+                          code.writeBlock(
+                            start: 'FragmentDef',
+                            opener: '(',
+                            closer: '),',
+                            write: (code) {
+                              code.writeLine(
+                                  "fragmentAlias: '${def.fragmentAlias}',");
+                              code.writeBlock(
+                                start: 'fragmentRefs:',
+                                opener: '[',
+                                closer: '],',
+                                write: (code) {
+                                  for (final ref in def.fragmentRefs) {
+                                    code.writeLine("'$ref',");
+                                  }
+                                },
+                              );
+                              code.writeLine(
+                                  "fragmentBody: r'''\n${def.fragmentBody}\n''',");
+                            },
+                          );
+                        }
+                      },
+                    );
+
+                    code.writeBlock(
+                      start: 'refMap:',
+                      opener: '{',
+                      closer: '},',
+                      write: (code) {
+                        for (final entry in file.refMap.entries) {
+                          if (entry.value.isEmpty) {
+                            continue;
+                          }
+                          code.writeBlock(
+                            start: "'${entry.key}':",
+                            opener: '[',
+                            closer: '],',
+                            write: (code) {
+                              for (final ref in entry.value) {
+                                code.writeLine("'$ref',");
+                              }
+                            },
+                          );
+                        }
+                      },
+                    );
+                  },
+                );
+              }
+            },
+          );
+        });
+
+    File(path).writeAsStringSync(code.toString());
+  }
+
+  FragmentFile _readFragmentsFile(FileSystemEntity file) {
+    final doc = parseGQLFile(file.path);
+
+    final result = FragmentFile(defs: [], refMap: {});
+    for (final def in doc.definitions) {
+      if (def is gql.FragmentDefinitionNode) {
+        final resultDef = _convertFramentDef(def);
+        result.defs.add(resultDef);
+        final refs = _findReferencedFragments(def).toList();
+        result.refMap[def.name.value] = refs;
+      }
+    }
+
+    return result;
   }
 
   void _writeExported() {
@@ -853,12 +971,25 @@ class Generator {
         code.writeLine('List<String> get operationNames => [$mappedNames];');
 
         code.writeLine();
-        code.writeLine('@override');
-        code.writeLine("String get operation => r'''");
+        final externalRefs = operation.directOperationFragmentRefsExternal;
+        if (externalRefs.isEmpty) {
+          code.writeLine('@override');
+          code.writeLine("String get operation => r'''");
+        } else {
+          code.writeLine('static String? _operationCached;');
+          code.writeLine('@override');
+          code.writeLine("String get operation => _operationCached ??= r'''");
+        }
         final formatted = reformatGQLFile(operation.filePath);
         code.write(formatted.escapeText(singleLine: false), addTabs: false);
         code.writeLine('');
-        code.writeLine("''';");
+        if (externalRefs.isEmpty) {
+          code.writeLine("''';");
+        } else {
+          code.writeLine("\n''' + findReferencedFragments([" +
+              externalRefs.map((e) => "'$e'").join(',') +
+              r"]).join('\n');");
+        }
 
         code.writeLine();
         code.writeLine('@override');
@@ -904,17 +1035,39 @@ class Generator {
     return gql.printNode(doc);
   }
 
+  Iterable<String> _findReferencedFragments(gql.Node def) sync* {
+    final finder = FragmentSpreadNodeFinder();
+    def.accept(finder);
+    final refs = finder.nodes;
+    for (final ref in refs) {
+      yield ref.name.value;
+    }
+  }
+
+  FragmentDef _convertFramentDef(gql.FragmentDefinitionNode def) {
+    return FragmentDef(
+      fragmentAlias: def.name.value,
+      fragmentBody: gql.printNode(def),
+      fragmentRefs: _findReferencedFragments(def).toList(),
+    );
+  }
+
   OperationInfo _generateFile(FileSystemEntity item) {
     final doc = parseGQLFile(item.path);
-    if (doc.definitions.length > 1) {
+    final noneFragments =
+        doc.definitions.where((e) => e is! gql.FragmentDefinitionNode).toList();
+    final fragments =
+        doc.definitions.whereType<gql.FragmentDefinitionNode>().toList();
+
+    if (noneFragments.length != 1) {
       throw Exception(
           'graph ql file must contian one definition: ${item.uri.fileName}');
     }
-    final def = doc.definitions.first;
+    final def = noneFragments.first;
 
     if (def is gql.OperationDefinitionNode) {
       final namedInputs = <QueryInput>[];
-
+      _findReferencedFragments(def);
       final inputs = def.variableDefinitions;
       for (final input in inputs) {
         final name = input.variable.name.value;
@@ -943,10 +1096,12 @@ class Generator {
         }
       }
       return OperationInfo(
-        item.path,
-        names,
-        namedInputs,
-        def.type,
+        filePath: item.path,
+        queryNames: names,
+        inputs: namedInputs,
+        type: def.type,
+        directOperationFragmentRefs: _findReferencedFragments(def).toList(),
+        fragmetDefs: fragments.map(_convertFramentDef).toList(),
       );
     } else {
       throw Exception(
