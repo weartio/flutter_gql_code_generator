@@ -63,9 +63,9 @@ class Generator {
     var checkQueryFiles = (FileSystemEntity file) =>
         file.uri.fileName.toLowerCase() != 'schema.graphql';
     if (enableFragments) {
+      final old = checkQueryFiles;
       checkQueryFiles = (file) =>
-          checkQueryFiles(file) &&
-          !file.uri.fileName.toLowerCase().startsWith('fragment.');
+          old(file) && !file.uri.fileName.toLowerCase().startsWith('fragment.');
     }
     final queryFiles = inputItems.where(checkQueryFiles).toList();
 
