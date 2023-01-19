@@ -47,8 +47,13 @@ Iterable<Generator> loadConfig() sync* {
     final packageDir = safeCast<String>(map['packageDir']);
     final inputDir = safeCast<String>(map['inputDir']);
     final outputDir = safeCast<String>(map['outputDir']);
-    final isNullSafety =
-        ['true', 'on', '1'].contains(map['isNullSafety']?.toString() ?? '');
+    bool toBoolean(String value) => ['true', 'on', '1'].contains(value);
+    final isNullSafety = toBoolean(map['isNullSafety']?.toString() ?? '');
+    final listFilesRecursively =
+        toBoolean(map['listFilesRecursively']?.toString() ?? '');
+    final enableFieldsAlias =
+        toBoolean(map['enableFieldsAlias']?.toString() ?? '');
+    final enableFragments = toBoolean(map['enableFragments']?.toString() ?? '');
     if ( //
         packageName == null || //
             packageDir == null || //
@@ -63,6 +68,9 @@ Iterable<Generator> loadConfig() sync* {
       inputDir: inputDir,
       outputDir: outputDir,
       isNullSafety: isNullSafety,
+      listFilesRecursively: listFilesRecursively,
+      enableFieldsAlias: enableFieldsAlias,
+      enableFragments: enableFragments,
     );
   }
 }

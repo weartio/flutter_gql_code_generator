@@ -1,0 +1,9 @@
+query {
+  listCities {
+    count
+    results {
+      id
+      name
+    }
+  }
+}

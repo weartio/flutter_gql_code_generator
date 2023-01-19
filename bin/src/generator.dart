@@ -1,6 +1,9 @@
 import 'dart:io';
+
 import 'package:gql/ast.dart' as gql;
 import 'package:gql/language.dart' as gql;
+import 'package:path/path.dart' as path_lib;
+
 import 'code_writer.dart';
 import 'default_value.dart';
 import 'field_info.dart';
@@ -26,6 +29,9 @@ class Generator {
     required this.inputDir,
     required this.outputDir,
     required this.isNullSafety,
+    required this.listFilesRecursively,
+    required this.enableFieldsAlias,
+    required this.enableFragments,
   });
   late gql.DocumentNode schema;
   late Map<String, gql.TypeDefinitionNode> schemeTypeDefinitions;
@@ -34,10 +40,14 @@ class Generator {
   final String inputDir;
   final String outputDir;
   final bool isNullSafety;
+  final bool listFilesRecursively;
+  final bool enableFieldsAlias;
+  final bool enableFragments;
 
   void generate() {
-    final inputItems = Directory(joinPath([packageDir, inputDir]))
-        .listSync()
+    final inputDirPath = joinPath([packageDir, inputDir]);
+    final inputItems = Directory(inputDirPath)
+        .listSync(recursive: listFilesRecursively)
         .orderBy((a, b) => a.path.compareTo(b.path))
         .where((element) => File(element.path).existsSync())
         .where(
@@ -49,16 +59,23 @@ class Generator {
     final schemePath = inputItems
         .firstWhere((e) => e.uri.fileName.toLowerCase() == 'schema.graphql')
         .path;
-    final queryFiles = inputItems.where(
-      (e) =>
-          e.uri.fileName.toLowerCase() != 'schema.graphql' &&
-          !e.uri.fileName.toLowerCase().startsWith('fragment.'),
-    );
-    final fragmentFiles = inputItems
-        .where(
-          (e) => e.uri.fileName.toLowerCase().startsWith('fragment.'),
-        )
-        .toList();
+
+    var checkQueryFiles = (FileSystemEntity file) =>
+        file.uri.fileName.toLowerCase() != 'schema.graphql';
+    if (enableFragments) {
+      checkQueryFiles = (file) =>
+          checkQueryFiles(file) &&
+          !file.uri.fileName.toLowerCase().startsWith('fragment.');
+    }
+    final queryFiles = inputItems.where(checkQueryFiles).toList();
+
+    final fragmentFiles = !enableFragments
+        ? <FileSystemEntity>[]
+        : inputItems
+            .where(
+              (e) => e.uri.fileName.toLowerCase().startsWith('fragment.'),
+            )
+            .toList();
     schema = parseGQLFile(schemePath);
     schemeTypeDefinitions = schema.definitions
         .whereType<gql.TypeDefinitionNode>()
@@ -76,7 +93,9 @@ class Generator {
 
     final allTypes = _findAllInputsAndOutputs(queries).toList();
     allTypes.forEach(_generateInputOutput);
-    queries.forEach(_generateOperation);
+    final _generateOperationFunc =
+        (OperationInfo e) => _generateOperation(e, inputDirPath);
+    queries.forEach(_generateOperationFunc);
     _writeFragmentDefsFile(fragmentFilesDefs);
     _writeExported();
     _writeHelper();
@@ -333,10 +352,11 @@ class Generator {
     }
   }
 
-  void writeImports(CodeWriter writer) {
+  void writeImports(CodeWriter writer, [int fileNestingLevel = 1]) {
+    final relativePath = '../' * fileNestingLevel;
     writer.writeLine('// ignore_for_file: unused_import');
-    writer.writeLine("import '../exported.dart';");
-    writer.writeLine("import '../helper.dart';");
+    writer.writeLine("import '${relativePath}exported.dart';");
+    writer.writeLine("import '${relativePath}helper.dart';");
     writer.writeLine();
   }
 
@@ -442,10 +462,12 @@ class Generator {
   }
 
   String getOperationPath(String name, String subFolder) {
-    final dir = joinPath([packageDir, outputDir, subFolder]);
+    final fileName = path_lib.split(name).lastOrNull ?? '';
+    final dir =
+        path_lib.dirname(joinPath([packageDir, outputDir, subFolder, name]));
     tryCreateDir(dir);
     addExported(subFolder, name + '.dart');
-    return joinPath([dir, name + '.dart']);
+    return joinPath([dir, fileName + '.dart']);
   }
 
   String? _serlizerTypeMapping(gql.TypeNode type, {int? level}) {
@@ -817,6 +839,9 @@ class Generator {
   }
 
   String? _findFieldAliase(List<gql.DirectiveNode> directives) {
+    if (!enableFieldsAlias) {
+      return null;
+    }
     return safeCast<gql.StringValueNode>(directives
             .firstWhereOrNull((e) => e.name.value == 'custom_alias')
             ?.arguments
@@ -896,18 +921,33 @@ class Generator {
     );
   }
 
-  void _generateOperation(OperationInfo operation) {
+  String getRelativeSubDirPath(String itemPath, String parentPath) {
+    final relative = path_lib.relative(
+        path_lib.dirname(path_lib.absolute(itemPath)),
+        from: path_lib.absolute(parentPath));
+    if (relative == '.') {
+      return '';
+    }
+    return relative;
+  }
+
+  void _generateOperation(OperationInfo operation, String inputDirPath) {
+    final subDirectory = getRelativeSubDirPath(
+      operation.filePath,
+      inputDirPath,
+    );
+    final nesting = path_lib.split(subDirectory).length + 1;
     final fileName = fixName(
       Uri.file(operation.filePath).fileNameWithoutExtension,
       operation.memberType,
     );
     final path = getOperationPath(
-      fileName,
+      path_lib.join(subDirectory, fileName),
       operation.memberType.name.capitalize(),
     );
 
     final code = CodeWriter();
-    writeImports(code);
+    writeImports(code, nesting);
     //final opName = fixName(operation.queryName, operation.memberType);
 
     final String noneNullOutputName;
@@ -977,7 +1017,7 @@ class Generator {
 
         code.writeLine();
         final externalRefs = operation.directOperationFragmentRefsExternal;
-        if (externalRefs.isEmpty) {
+        if (!enableFragments || externalRefs.isEmpty) {
           code.writeLine('@override');
           code.writeLine("String get operation => r'''");
         } else {
@@ -988,7 +1028,7 @@ class Generator {
         final formatted = reformatGQLFile(operation.filePath);
         code.write(formatted.escapeText(singleLine: false), addTabs: false);
         code.writeLine('');
-        if (externalRefs.isEmpty) {
+        if (!enableFragments || externalRefs.isEmpty) {
           code.writeLine("''';");
         } else {
           code.writeLine("\n''' + findReferencedFragments([" +
@@ -1105,8 +1145,10 @@ class Generator {
         queryNames: names,
         inputs: namedInputs,
         type: def.type,
-        directOperationFragmentRefs: _findReferencedFragments(def).toList(),
-        fragmetDefs: fragments.map(_convertFramentDef).toList(),
+        directOperationFragmentRefs:
+            enableFragments ? _findReferencedFragments(def).toList() : [],
+        fragmetDefs:
+            enableFragments ? fragments.map(_convertFramentDef).toList() : [],
       );
     } else {
       throw Exception(

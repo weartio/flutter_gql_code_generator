@@ -31,5 +31,8 @@ void main(List<String> args) {
     inputDir: inputDir,
     outputDir: outputDir,
     isNullSafety: true,
+    listFilesRecursively: true,
+    enableFieldsAlias: true,
+    enableFragments: true,
   ).generate();
 }
