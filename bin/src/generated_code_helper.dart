@@ -287,7 +287,11 @@ Iterable<String> findReferencedFragments(
   bool skipLocals = true,
   Set<String> traversedCache = const {},
 ]) sync* {
-  for (final ref in Set<String>.from(refs)) {
+  final found = <String>{};
+  for (final ref in refs) {
+    if (!found.add(ref)) {
+      continue;
+    }
     final localDef = localFragments.firstWhereOrNull(
       (e) => e.name == ref,
     );
