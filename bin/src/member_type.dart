@@ -7,6 +7,7 @@ enum MemberType {
   mutation,
   subscription,
   interface,
+  union,
 }
 
 extension MemberTypeExtension on MemberType {
@@ -28,6 +29,8 @@ extension MemberTypeExtension on MemberType {
         return 'Subscriptions';
       case MemberType.interface:
         return 'Interfaces';
+      case MemberType.union:
+        return 'Union';
     }
   }
 }

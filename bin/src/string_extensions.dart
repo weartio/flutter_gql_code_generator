@@ -82,6 +82,7 @@ extension FixName on String {
       case MemberType.enumeration:
       case MemberType.subscription:
       case MemberType.interface:
+      case MemberType.union:
         return _fixName(FixNameTarget.typeDecl);
     }
   }

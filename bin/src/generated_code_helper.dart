@@ -105,7 +105,6 @@ class GraphQLResponse<T> {
 
   final T? data;
   final List<GraphQLError?>? errors;
-
   static GraphQLResponse<T>? fromDynamic<T>(
     dynamic value, {
     required List<String> resultNames,
@@ -182,10 +181,13 @@ class GraphQLError {
   GraphQLError({
     this.message,
     this.locations,
+    this.raw = const <String, dynamic>{},
   });
 
   final String? message;
   final List<GraphQLErrorLocation?>? locations;
+  final Map<String, dynamic> raw;
+
   static GraphQLError? fromDynamic(dynamic value) {
     return fromMap(safeCast<Map<String, dynamic>>(value));
   }
@@ -195,6 +197,7 @@ class GraphQLError {
       return null;
     }
     return GraphQLError(
+      raw: value,
       message: value.tryParse(
         'message',
         tryParseString,
@@ -205,6 +208,8 @@ class GraphQLError {
       ),
     );
   }
+
+  dynamic operator [](String key) => raw[key];
 }
 
 class GraphQLErrorLocation {
@@ -269,7 +274,6 @@ class FragmentDef {
   final String name;
   final String code;
 }
-
 
 class FragmentFile {
   FragmentFile({
