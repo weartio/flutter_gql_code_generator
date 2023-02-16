@@ -210,6 +210,14 @@ class GraphQLError {
   }
 
   dynamic operator [](String key) => raw[key];
+
+  void operator []=(String key, dynamic value) => raw[key] = value;
+
+  bool containsValue(dynamic value) => raw.containsValue(value);
+
+  bool containsKey(String key) => raw.containsKey(key);
+
+  Iterable<MapEntry<String, dynamic>> get entries => raw.entries;
 }
 
 class GraphQLErrorLocation {
