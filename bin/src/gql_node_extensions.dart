@@ -26,6 +26,8 @@ extension NodeExtension on gql.Node {
       return MemberType.outputModel;
     } else if (def is gql.InterfaceTypeDefinitionNode) {
       return MemberType.interface;
+    } else if (def is gql.UnionTypeDefinitionNode) {
+      return MemberType.union;
     }
     throw Exception(
         'unsupported type: ${def.runtimeType} can not get memberType');

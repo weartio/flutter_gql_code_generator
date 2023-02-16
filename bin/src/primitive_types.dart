@@ -1,3 +1,6 @@
+import 'package:gql/ast.dart' as gql;
+import 'iterable_extensions.dart';
+
 enum PrimitveTypes { ID, String, Int, Float, Boolean }
 
 extension PrimitveTypesExtensions on PrimitveTypes {
@@ -41,4 +44,20 @@ extension PrimitveTypesExtensions on PrimitveTypes {
         return 'false';
     }
   }
+}
+
+extension PrimitveTypesStringExtensions on String {
+  PrimitveTypes? asPrimitiveType() {
+    return PrimitveTypes.values.firstWhereOrNull((e) => e.name == this);
+  }
+
+  bool get isPrimitiveTypeName => asPrimitiveType() != null;
+}
+
+extension PrimitveTypesNamedTypeExtensions on gql.NamedTypeNode {
+  PrimitveTypes? asPrimitiveType() {
+    return name.value.asPrimitiveType();
+  }
+
+  bool get isPrimitiveTypeName => name.value.isPrimitiveTypeName;
 }

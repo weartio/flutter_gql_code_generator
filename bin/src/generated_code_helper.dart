@@ -1,6 +1,7 @@
 String get generatedCodeHelper {
   return r'''
 import 'dart:convert';
+import 'fragment_defs.dart';
 
 extension MapParserHelper on Map<String, dynamic> {
   T? tryParse<T>(String name, T? Function(dynamic) parser) {
@@ -104,7 +105,6 @@ class GraphQLResponse<T> {
 
   final T? data;
   final List<GraphQLError?>? errors;
-
   static GraphQLResponse<T>? fromDynamic<T>(
     dynamic value, {
     required List<String> resultNames,
@@ -181,10 +181,13 @@ class GraphQLError {
   GraphQLError({
     this.message,
     this.locations,
+    this.raw = const <String, dynamic>{},
   });
 
   final String? message;
   final List<GraphQLErrorLocation?>? locations;
+  final Map<String, dynamic> raw;
+
   static GraphQLError? fromDynamic(dynamic value) {
     return fromMap(safeCast<Map<String, dynamic>>(value));
   }
@@ -194,6 +197,7 @@ class GraphQLError {
       return null;
     }
     return GraphQLError(
+      raw: value,
       message: value.tryParse(
         'message',
         tryParseString,
@@ -204,6 +208,16 @@ class GraphQLError {
       ),
     );
   }
+
+  dynamic operator [](String key) => raw[key];
+
+  void operator []=(String key, dynamic value) => raw[key] = value;
+
+  bool containsValue(dynamic value) => raw.containsValue(value);
+
+  bool containsKey(String key) => raw.containsKey(key);
+
+  Iterable<MapEntry<String, dynamic>> get entries => raw.entries;
 }
 
 class GraphQLErrorLocation {
@@ -246,7 +260,85 @@ extension<T> on Iterable<T> {
     }
     return value;
   }
+
+  T? firstWhereOrNull(bool Function(T) predicate) {
+    for (final item in this) {
+      if (predicate(item)) {
+        return item;
+      }
+    }
+    return null;
+  }
 }
 
+class FragmentDef {
+  FragmentDef({
+    required this.name,
+    required this.refs,
+    required this.code,
+  });
+
+  final List<String> refs;
+  final String name;
+  final String code;
+}
+
+class FragmentFile {
+  FragmentFile({
+    required this.defs,
+    required this.refMap,
+  });
+
+  final List<FragmentDef> defs;
+  final Map<String, List<String>> refMap;
+}
+
+Iterable<String> findReferencedFragments(
+  List<String> refs, [
+  List<FragmentDef> localFragments = const [],
+  bool skipLocals = true,
+  Set<String> traversedCache = const {},
+]) sync* {
+  final found = <String>{};
+  for (final ref in refs) {
+    if (!found.add(ref)) {
+      continue;
+    }
+    final localDef = localFragments.firstWhereOrNull(
+      (e) => e.name == ref,
+    );
+    final isLocal = localDef != null;
+    final isGlobal = !isLocal;
+    if (skipLocals && isLocal) {
+      continue;
+    }
+    final isTraversed = !traversedCache.add(ref);
+    if (isTraversed && isGlobal) {
+      continue;
+    }
+    if (isLocal) {
+      yield localDef.code;
+      continue;
+    }
+    for (final file in fragmentFiles) {
+      final def = file.defs.firstWhereOrNull(
+        (e) => e.name == ref,
+      );
+      if (def == null) {
+        continue;
+      }
+      final innerRefs = file.refMap[def.name];
+      if (innerRefs != null) {
+        yield* findReferencedFragments(
+          innerRefs,
+          file.defs,
+          false,
+          traversedCache,
+        );
+      }
+      break;
+    }
+  }
+}
 ''';
 }

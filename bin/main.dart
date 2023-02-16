@@ -1,5 +1,6 @@
 import 'package:args/args.dart';
 import 'src/generator.dart';
+import 'src/helpers.dart';
 
 void main(List<String> args) {
   final parser = ArgParser();
@@ -7,12 +8,23 @@ void main(List<String> args) {
   parser.addOption('packageName', abbr: 'p');
   parser.addOption('inputDir', abbr: 'i');
   parser.addOption('outputDir', abbr: 'o');
+  parser.addFlag('isNullSafety', abbr: 'n');
+  parser.addFlag('listFilesRecursively', abbr: 'r');
+  parser.addFlag('enableFieldsAlias', abbr: 'a');
+  parser.addFlag('enableFragments', abbr: 'f');
+
   final results = parser.parse(args);
 
   final dynamic packageDir = results['packageDir'];
   final dynamic packageName = results['packageName'];
   final dynamic inputDir = results['inputDir'];
   final dynamic outputDir = results['outputDir'];
+  final isNullSafety = safeCast<bool>(results['isNullSafety']) ?? false;
+  final listFilesRecursively =
+      safeCast<bool>(results['listFilesRecursively']) ?? false;
+  final enableFieldsAlias =
+      safeCast<bool>(results['enableFieldsAlias']) ?? false;
+  final enableFragments = safeCast<bool>(results['enableFragments']) ?? false;
   if (inputDir == null || inputDir is! String) {
     throw Exception('inputDir is mandatory');
   }
@@ -25,11 +37,15 @@ void main(List<String> args) {
   if (packageDir == null || packageDir is! String) {
     throw Exception('packageDir is mandatory');
   }
+
   Generator(
     packageName: packageName,
     packageDir: packageDir,
     inputDir: inputDir,
     outputDir: outputDir,
-    isNullSafety: true,
+    isNullSafety: isNullSafety,
+    listFilesRecursively: listFilesRecursively,
+    enableFieldsAlias: enableFieldsAlias,
+    enableFragments: enableFragments,
   ).generate();
 }

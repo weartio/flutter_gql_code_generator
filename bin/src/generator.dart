@@ -1,9 +1,15 @@
 import 'dart:io';
+
 import 'package:gql/ast.dart' as gql;
 import 'package:gql/language.dart' as gql;
+import 'package:path/path.dart' as path_lib;
+
 import 'code_writer.dart';
 import 'default_value.dart';
 import 'field_info.dart';
+import 'fragment_def.dart';
+import 'fragment_file.dart';
+import 'fragment_spread_nodes_finder.dart';
 import 'generated_code_helper.dart';
 import 'gql_node_extensions.dart';
 import 'helpers.dart';
@@ -14,6 +20,7 @@ import 'primitive_types.dart';
 import 'query_input.dart';
 import 'string_extensions.dart';
 import 'type_info.dart';
+import 'union_case_data.dart';
 import 'uri_extensions.dart';
 
 class Generator {
@@ -23,6 +30,9 @@ class Generator {
     required this.inputDir,
     required this.outputDir,
     required this.isNullSafety,
+    required this.listFilesRecursively,
+    required this.enableFieldsAlias,
+    required this.enableFragments,
   });
   late gql.DocumentNode schema;
   late Map<String, gql.TypeDefinitionNode> schemeTypeDefinitions;
@@ -31,21 +41,42 @@ class Generator {
   final String inputDir;
   final String outputDir;
   final bool isNullSafety;
+  final bool listFilesRecursively;
+  final bool enableFieldsAlias;
+  final bool enableFragments;
 
   void generate() {
-    final inputItems = Directory(joinPath([packageDir, inputDir]))
-        .listSync()
+    final inputDirPath = joinPath([packageDir, inputDir]);
+    final inputItems = Directory(inputDirPath)
+        .listSync(recursive: listFilesRecursively)
         .orderBy((a, b) => a.path.compareTo(b.path))
         .where((element) => File(element.path).existsSync())
-        .where((e) =>
-            ['graphql', 'gql'].contains(e.uri.fileExtension.toLowerCase()));
+        .where(
+          (e) => ['graphql', 'gql'].contains(
+            e.uri.fileExtension.toLowerCase(),
+          ),
+        );
 
     final schemePath = inputItems
         .firstWhere((e) => e.uri.fileName.toLowerCase() == 'schema.graphql')
         .path;
-    final queryFiles = inputItems
-        .where((e) => e.uri.fileName.toLowerCase() != 'schema.graphql');
 
+    var checkQueryFiles = (FileSystemEntity file) =>
+        file.uri.fileName.toLowerCase() != 'schema.graphql';
+    if (enableFragments) {
+      final old = checkQueryFiles;
+      checkQueryFiles = (file) =>
+          old(file) && !file.uri.fileName.toLowerCase().startsWith('fragment.');
+    }
+    final queryFiles = inputItems.where(checkQueryFiles).toList();
+
+    final fragmentFiles = !enableFragments
+        ? <FileSystemEntity>[]
+        : inputItems
+            .where(
+              (e) => e.uri.fileName.toLowerCase().startsWith('fragment.'),
+            )
+            .toList();
     schema = parseGQLFile(schemePath);
     schemeTypeDefinitions = schema.definitions
         .whereType<gql.TypeDefinitionNode>()
@@ -59,12 +90,124 @@ class Generator {
     for (final query in queries) {
       query.resolveOutput(this);
     }
+    final fragmentFilesDefs = fragmentFiles.map(_readFragmentsFile).toList();
 
     final allTypes = _findAllInputsAndOutputs(queries).toList();
     allTypes.forEach(_generateInputOutput);
-    queries.forEach(_generateOperation);
+    final _generateOperationFunc =
+        (OperationInfo e) => _generateOperation(e, inputDirPath);
+    queries.forEach(_generateOperationFunc);
+    _writeFragmentDefsFile(fragmentFilesDefs);
     _writeExported();
     _writeHelper();
+  }
+
+  void _writeFragmentDefsFile(List<FragmentFile> files) {
+    final path = joinPath([packageDir, outputDir, 'fragment_defs.dart']);
+    final code = CodeWriter();
+    final mapped = exportedList.map((e) {
+      if (e.startsWith('/')) {
+        return e.substring(1);
+      }
+      return e;
+    }).toList();
+    mapped.sort((a, b) => a.compareTo(b));
+
+    code.writeLine("import 'helper.dart';");
+    code.writeLine('List<FragmentFile>? _fragmentFiles;');
+    code.writeBlock(
+        start: 'List<FragmentFile> get fragmentFiles',
+        write: (code) {
+          code.writeBlock(
+            start: 'return _fragmentFiles ??=',
+            opener: '[',
+            closer: '];',
+            write: (code) {
+              for (final file in files) {
+                code.writeBlock(
+                  start: 'FragmentFile',
+                  opener: '(',
+                  closer: '),',
+                  write: (code) {
+                    code.writeBlock(
+                      start: 'defs:',
+                      opener: '[',
+                      closer: '],',
+                      write: (code) {
+                        for (final def in file.defs) {
+                          code.writeBlock(
+                            start: 'FragmentDef',
+                            opener: '(',
+                            closer: '),',
+                            write: (code) {
+                              code.writeLine(
+                                "name: '${def.name}',",
+                              );
+                              code.writeBlock(
+                                start: 'refs:',
+                                opener: '[',
+                                closer: '],',
+                                write: (code) {
+                                  for (final ref in def.refs) {
+                                    code.writeLine("'$ref',");
+                                  }
+                                },
+                              );
+                              code.writeLine(
+                                "code: r'''\n${def.code}\n''',",
+                              );
+                            },
+                          );
+                        }
+                      },
+                    );
+
+                    code.writeBlock(
+                      start: 'refMap:',
+                      opener: '{',
+                      closer: '},',
+                      write: (code) {
+                        for (final entry in file.refMap.entries) {
+                          if (entry.value.isEmpty) {
+                            continue;
+                          }
+                          code.writeBlock(
+                            start: "'${entry.key}':",
+                            opener: '[',
+                            closer: '],',
+                            write: (code) {
+                              for (final ref in entry.value) {
+                                code.writeLine("'$ref',");
+                              }
+                            },
+                          );
+                        }
+                      },
+                    );
+                  },
+                );
+              }
+            },
+          );
+        });
+
+    File(path).writeAsStringSync(code.toString());
+  }
+
+  FragmentFile _readFragmentsFile(FileSystemEntity file) {
+    final doc = parseGQLFile(file.path);
+
+    final result = FragmentFile(defs: [], refMap: {});
+    for (final def in doc.definitions) {
+      if (def is gql.FragmentDefinitionNode) {
+        final resultDef = _convertFramentDef(def);
+        result.defs.add(resultDef);
+        final refs = _findReferencedFragments(def).toList();
+        result.refMap[def.name.value] = refs;
+      }
+    }
+
+    return result;
   }
 
   void _writeExported() {
@@ -172,7 +315,7 @@ class Generator {
       throw Exception('un supported type ${type.runtimeType}');
     }
 
-    if (PrimitveTypes.values.any((e) => e.name == name)) {
+    if (name.isPrimitiveTypeName) {
       return;
     }
     if (result.contains(name)) {
@@ -204,16 +347,22 @@ class Generator {
       _referencedInterfaces(def, result);
     } else if (def == null) {
       throw Exception('input model $name not found in the scheme.');
+    } else if (def is gql.UnionTypeDefinitionNode) {
+      result.add(name);
+      for (final element in def.types) {
+        _referencedInputOutputTypes(element, result);
+      }
     } else {
       throw Exception(
           'not supported input type for [$name]: ${def.runtimeType}');
     }
   }
 
-  void writeImports(CodeWriter writer) {
+  void writeImports(CodeWriter writer, [int fileNestingLevel = 1]) {
+    final relativePath = '../' * fileNestingLevel;
     writer.writeLine('// ignore_for_file: unused_import');
-    writer.writeLine("import '../exported.dart';");
-    writer.writeLine("import '../helper.dart';");
+    writer.writeLine("import '${relativePath}exported.dart';");
+    writer.writeLine("import '${relativePath}helper.dart';");
     writer.writeLine();
   }
 
@@ -319,27 +468,30 @@ class Generator {
   }
 
   String getOperationPath(String name, String subFolder) {
-    final dir = joinPath([packageDir, outputDir, subFolder]);
+    final fileName = path_lib.split(name).lastOrNull ?? '';
+    final dir =
+        path_lib.dirname(joinPath([packageDir, outputDir, subFolder, name]));
     tryCreateDir(dir);
     addExported(subFolder, name + '.dart');
-    return joinPath([dir, name + '.dart']);
+    return joinPath([dir, fileName + '.dart']);
   }
 
-  String? _serlizerTypeMapping(gql.TypeNode type, {int? level}) {
-    var nullCheck = type.isNullable && isNullSafety ? '?' : '';
+  String serlizerTypeMapping(gql.TypeNode type,
+      {bool addNullChecks = true, int? level}) {
+    var nullCheck =
+        (addNullChecks && type.isNullable && isNullSafety) ? '?' : '';
 
     if (type is gql.NamedTypeNode) {
-      final primitive = PrimitveTypes.values
-          .firstWhereOrNull((e) => e.name == type.name.value);
+      final primitive = type.asPrimitiveType();
       final name = type.name.value;
       if (primitive != null) {
-        return null;
+        return '';
       } else {
         final inputType = schemeTypeDefinitions[name];
         if (inputType == null) {
           throw Exception('type $name not found in the scheme');
         }
-        nullCheck = '?';
+        nullCheck = addNullChecks ? '?' : '';
         if (inputType.isEnumDefinition) {
           return nullCheck + '.rawValue';
         }
@@ -347,10 +499,7 @@ class Generator {
         return nullCheck + '.toMap()';
       }
     } else if (type is gql.ListTypeNode) {
-      final inner = _serlizerTypeMapping(type.type, level: (level ?? 0) + 1);
-      if (inner == null) {
-        return null;
-      }
+      final inner = serlizerTypeMapping(type.type, level: (level ?? 0) + 1);
       final varName = 'e${level ?? ''}';
       return nullCheck + '.map(($varName)=> $varName$inner).toList()';
     } else {
@@ -364,8 +513,8 @@ class Generator {
   ) {
     final type = field.type;
     writer
-      ..write(fixName(field.name, MemberType.field))
-      ..write(_serlizerTypeMapping(type) ?? '');
+      ..write(fixName(field.codeGenName, MemberType.field))
+      ..write(serlizerTypeMapping(type));
   }
 
   void _generateInterface(
@@ -386,7 +535,7 @@ class Generator {
         for (final field in def.fields) {
           final type = field.type;
           code
-            ..write(_mapType(type))
+            ..write(mapType(type))
             ..write(' get ')
             ..write(fixName(field.name.value, MemberType.field))
             ..writeLine(';');
@@ -420,6 +569,139 @@ class Generator {
     return false;
   }
 
+  void _generateUnion(String path, gql.UnionTypeDefinitionNode def) {
+    final code = CodeWriter();
+    final name = def.name.value;
+    final fixedName = fixName(name, MemberType.union);
+    final casesTypeName = fixedName + 'TypeCases';
+    final values = def.types.map((v) => UnionCaseData.from(v, this)).toList();
+    writeImports(code);
+
+    code.writeBlock(
+      start: 'class $fixedName',
+      write: (code) {
+        code.writeBlock(
+          start: 'const $fixedName',
+          opener: '({',
+          closer: '});',
+          write: (code) {
+            for (final name in values) {
+              code.writeLine('this.${name.fieldName},');
+            }
+            code.writeLine('required this.rawData,');
+            code.writeLine('required this.type,');
+          },
+        );
+        for (final name in values) {
+          code.writeLine('final ${name.typeName}? ${name.fieldName};');
+        }
+
+        code.writeLine('final dynamic rawData;');
+        code.writeLine('final $casesTypeName type;');
+        code.writeBlock(
+          start: 'static $fixedName? fromDynamic(dynamic value)',
+          write: (code) {
+            code.writeBlock(
+              start: 'if (value == null)',
+              write: (code) => code.writeLine('return null;'),
+            );
+
+            for (final name in values) {
+              code.writeLine('${name.typeName}? ${name.varName};');
+            }
+            code.writeLine('var type = $casesTypeName.unknown;');
+            code.writeBlock(
+              start: 'if (value is Map<String, dynamic>)',
+              write: (code) {
+                code.writeLine(
+                    'final typeName = safeCast<String>(value[\'__typename\']);');
+                code.writeBlock(
+                  start: 'switch (typeName)',
+                  write: (code) {
+                    for (final name in values) {
+                      code.writeBlock(
+                        start: "case '${name.gqlTypeName}'",
+                        opener: ':',
+                        closer: '',
+                        write: (code) {
+                          code.writeLine(
+                              'type = $casesTypeName.${name.caseName};');
+                          code.writeLine(
+                              '${name.varName} = ${name.parser}(value);');
+                          code.writeLine('break;');
+                        },
+                      );
+                    }
+                  },
+                );
+              },
+            );
+            code.writeBlock(
+              start: 'return $fixedName',
+              opener: '(',
+              closer: ');',
+              write: (code) {
+                for (final name in values) {
+                  code.writeLine('${name.fieldName}: ${name.varName},');
+                }
+                code.writeLine('rawData: value,');
+                code.writeLine('type: type,');
+              },
+            );
+          },
+        );
+
+        code.writeBlock(
+          start: 'Map<String, dynamic> toMap()',
+          write: (writer) {
+            code.writeBlock(
+              start: 'switch (type)',
+              write: (code) {
+                code.writeBlock(
+                  start: 'case $casesTypeName.unknown',
+                  opener: ':',
+                  closer: '',
+                  write: (code) {
+                    code.writeLine(
+                      'return safeCast(rawData) ?? <String, dynamic>{};',
+                    );
+                  },
+                );
+                for (final value in values) {
+                  code.writeBlock(
+                    start: 'case $casesTypeName.${value.caseName}',
+                    opener: ':',
+                    closer: '',
+                    write: (code) {
+                      final nullCheck = value.serializer.isEmpty ? '' : '?';
+                      final line =
+                          '${value.fieldName}$nullCheck${value.serializer}';
+                      code.writeLine('return $line ??');
+                      code.writeLine('safeCast(rawData) ??');
+                      code.writeLine('<String, dynamic>{};');
+                    },
+                  );
+                }
+              },
+            );
+          },
+        );
+      },
+    );
+
+    code.writeBlock(
+      start: 'enum $casesTypeName',
+      write: (code) {
+        code.writeLine('unknown,');
+        for (final type in values) {
+          code.writeLine('${type.caseName},');
+        }
+      },
+    );
+    final codeBody = code.toString();
+    File(path).writeAsStringSync(codeBody);
+  }
+
   void generateClass(
     String outputPath,
     String name,
@@ -450,8 +732,8 @@ class Generator {
                 if (fieldType.isNonNull) {
                   var addRequired = true;
                   if (fieldType is gql.NamedTypeNode) {
-                    final isPrimitve = PrimitveTypes.values
-                        .any((e) => e.name == fieldType.name.value);
+                    final isPrimitve = fieldType.isPrimitiveTypeName;
+
                     if (!isPrimitve) {
                       addRequired = false;
                     }
@@ -465,7 +747,7 @@ class Generator {
                 }
                 writer
                   ..write('this.')
-                  ..write(fixName(field.name, MemberType.field));
+                  ..write(fixName(field.codeGenName, MemberType.field));
 
                 final defaultValue = field.defaultValue;
                 if (defaultValue != null && defaultValue is! NullDefaultValue) {
@@ -486,9 +768,9 @@ class Generator {
           }
           writer
             ..write('final ')
-            ..write(_mapType(type))
+            ..write(mapType(type))
             ..write(' ')
-            ..write(fixName(field.name, MemberType.field))
+            ..write(fixName(field.codeGenName, MemberType.field))
             ..writeLine(';');
         }
         final nullCheck = isNullSafety ? '?' : '';
@@ -523,7 +805,7 @@ class Generator {
               closer: ');',
               write: (writer) {
                 for (final field in fields) {
-                  writer.write(fixName(field.name, MemberType.field));
+                  writer.write(fixName(field.codeGenName, MemberType.field));
                   writer.write(': ');
                   _writeFieldParser(
                     writer,
@@ -548,6 +830,7 @@ class Generator {
               opener: '{',
               closer: '};',
               write: (writer) {
+                writer.writeLine("'__typename': '$name',");
                 for (final field in fields) {
                   writer.write("'${field.name}'");
                   writer.write(': ');
@@ -567,13 +850,12 @@ class Generator {
     File(outputPath).writeAsStringSync(code);
   }
 
-  String _getTypeParser(
+  String getTypeParser(
     gql.TypeNode type,
   ) {
     if (type is gql.NamedTypeNode) {
       final name = type.name.value;
-      final primitve =
-          PrimitveTypes.values.firstWhereOrNull((e) => e.name == name);
+      final primitve = type.asPrimitiveType();
       if (primitve != null) {
         return primitve.parser;
       } else {
@@ -590,7 +872,7 @@ class Generator {
         }
       }
     } else if (type is gql.ListTypeNode) {
-      final element = _getTypeParser(type.type);
+      final element = getTypeParser(type.type);
       return 'arrayParser($element)';
     } else {
       throw Exception('Un supported type ${type.runtimeType}');
@@ -602,8 +884,7 @@ class Generator {
   ) {
     if (type is gql.NamedTypeNode) {
       final name = type.name.value;
-      final primitve =
-          PrimitveTypes.values.firstWhereOrNull((e) => e.name == name);
+      final primitve = type.asPrimitiveType();
       if (primitve != null) {
         return primitve.defaultValue;
       } else {
@@ -641,18 +922,17 @@ class Generator {
     writer
       ..write('$mapName.tryParse(')
       ..write("'${field.name}', ")
-      ..write(_getTypeParser(type))
+      ..write(getTypeParser(type))
       ..write(')');
   }
 
-  String _mapType(gql.TypeNode type, {bool addNullCheck = true}) {
+  String mapType(gql.TypeNode type, {bool addNullCheck = true}) {
     var nullableSuffix =
         addNullCheck && isNullSafety && type.isNullable ? '?' : '';
     if (type is gql.NamedTypeNode) {
       final String result;
       final name = type.name.value;
-      final primitive =
-          PrimitveTypes.values.firstWhereOrNull((e) => e.name == name);
+      final primitive = name.asPrimitiveType();
       if (primitive != null) {
         result = primitive.dartName;
       } else {
@@ -666,7 +946,7 @@ class Generator {
       }
       return result + nullableSuffix;
     } else if (type is gql.ListTypeNode) {
-      final element = _mapType(type.type);
+      final element = mapType(type.type);
       return 'List<$element>' + nullableSuffix;
     } else {
       throw Exception('Un supported type ${type.runtimeType}');
@@ -690,7 +970,21 @@ class Generator {
         return name.fixName(type).addSuffix('Mutation');
       case MemberType.subscription:
         return name.fixName(type).addSuffix('Subscription');
+      case MemberType.union:
+        return name.fixName(type).addSuffix('Union');
     }
+  }
+
+  String? _findFieldAliase(List<gql.DirectiveNode> directives) {
+    if (!enableFieldsAlias) {
+      return null;
+    }
+    return safeCast<gql.StringValueNode>(directives
+            .firstWhereOrNull((e) => e.name.value == 'custom_alias')
+            ?.arguments
+            .firstWhereOrNull((e) => e.name.value == 'name')
+            ?.value)
+        ?.value;
   }
 
   void _generateInputOutput(String name) {
@@ -708,6 +1002,7 @@ class Generator {
               (e) => FieldInfo(
                 name: e.name.value,
                 type: e.type,
+                aliase: _findFieldAliase(e.directives),
               ),
             )
             .toList(),
@@ -723,6 +1018,7 @@ class Generator {
               (e) => FieldInfo(
                 name: e.name.value,
                 type: e.type,
+                aliase: _findFieldAliase(e.directives),
                 defaultValue: _mapDefaultValue(
                   e.defaultValue,
                   e.type,
@@ -737,6 +1033,8 @@ class Generator {
       _generateEnum(path, def);
     } else if (def is gql.InterfaceTypeDefinitionNode) {
       _generateInterface(path, def);
+    } else if (def is gql.UnionTypeDefinitionNode) {
+      _generateUnion(path, def);
     } else {
       throw Exception(
           'not supported input type for [$name]: ${def.runtimeType}');
@@ -762,18 +1060,33 @@ class Generator {
     );
   }
 
-  void _generateOperation(OperationInfo operation) {
+  String getRelativeSubDirPath(String itemPath, String parentPath) {
+    final relative = path_lib.relative(
+        path_lib.dirname(path_lib.absolute(itemPath)),
+        from: path_lib.absolute(parentPath));
+    if (relative == '.') {
+      return '';
+    }
+    return relative;
+  }
+
+  void _generateOperation(OperationInfo operation, String inputDirPath) {
+    final subDirectory = getRelativeSubDirPath(
+      operation.filePath,
+      inputDirPath,
+    );
+    final nesting = path_lib.split(subDirectory).length + 1;
     final fileName = fixName(
       Uri.file(operation.filePath).fileNameWithoutExtension,
       operation.memberType,
     );
     final path = getOperationPath(
-      fileName,
+      path_lib.join(subDirectory, fileName),
       operation.memberType.name.capitalize(),
     );
 
     final code = CodeWriter();
-    writeImports(code);
+    writeImports(code, nesting);
     //final opName = fixName(operation.queryName, operation.memberType);
 
     final String noneNullOutputName;
@@ -781,9 +1094,9 @@ class Generator {
     final String typeParser;
     if (operation.outputTypes.length == 1) {
       final type = operation.outputTypes.entries.first.value.type;
-      noneNullOutputName = _mapType(type, addNullCheck: false);
-      outputName = _mapType(type);
-      typeParser = _getTypeParser(type);
+      noneNullOutputName = mapType(type, addNullCheck: false);
+      outputName = mapType(type);
+      typeParser = getTypeParser(type);
     } else {
       final name = '${fileName}OutputModel';
       _generateAggregateOperationResultType(name, operation.outputTypes);
@@ -827,7 +1140,7 @@ class Generator {
         code.writeLine();
         for (final field in operation.inputs) {
           final fieldType = field.type;
-          final type = _mapType(fieldType);
+          final type = mapType(fieldType);
           code.write('final ');
           code.write(type);
           code.write(' ');
@@ -842,12 +1155,25 @@ class Generator {
         code.writeLine('List<String> get operationNames => [$mappedNames];');
 
         code.writeLine();
-        code.writeLine('@override');
-        code.writeLine("String get operation => r'''");
+        final externalRefs = operation.directOperationFragmentRefsExternal;
+        if (!enableFragments || externalRefs.isEmpty) {
+          code.writeLine('@override');
+          code.writeLine("String get operation => r'''");
+        } else {
+          code.writeLine('static String? _operationCached;');
+          code.writeLine('@override');
+          code.writeLine("String get operation => _operationCached ??= r'''");
+        }
         final formatted = reformatGQLFile(operation.filePath);
         code.write(formatted.escapeText(singleLine: false), addTabs: false);
         code.writeLine('');
-        code.writeLine("''';");
+        if (!enableFragments || externalRefs.isEmpty) {
+          code.writeLine("''';");
+        } else {
+          code.writeLine("\n''' + findReferencedFragments([" +
+              externalRefs.map((e) => "'$e'").join(',') +
+              r"]).join('\n');");
+        }
 
         code.writeLine();
         code.writeLine('@override');
@@ -893,17 +1219,39 @@ class Generator {
     return gql.printNode(doc);
   }
 
+  Iterable<String> _findReferencedFragments(gql.Node def) sync* {
+    final finder = FragmentSpreadNodeFinder();
+    def.accept(finder);
+    final refs = finder.nodes;
+    for (final ref in refs) {
+      yield ref.name.value;
+    }
+  }
+
+  FragmentDef _convertFramentDef(gql.FragmentDefinitionNode def) {
+    return FragmentDef(
+      name: def.name.value,
+      code: gql.printNode(def),
+      refs: _findReferencedFragments(def).toList(),
+    );
+  }
+
   OperationInfo _generateFile(FileSystemEntity item) {
     final doc = parseGQLFile(item.path);
-    if (doc.definitions.length > 1) {
+    final noneFragments =
+        doc.definitions.where((e) => e is! gql.FragmentDefinitionNode).toList();
+    final fragments =
+        doc.definitions.whereType<gql.FragmentDefinitionNode>().toList();
+
+    if (noneFragments.length != 1) {
       throw Exception(
           'graph ql file must contian one definition: ${item.uri.fileName}');
     }
-    final def = doc.definitions.first;
+    final def = noneFragments.first;
 
     if (def is gql.OperationDefinitionNode) {
       final namedInputs = <QueryInput>[];
-
+      _findReferencedFragments(def);
       final inputs = def.variableDefinitions;
       for (final input in inputs) {
         final name = input.variable.name.value;
@@ -932,10 +1280,14 @@ class Generator {
         }
       }
       return OperationInfo(
-        item.path,
-        names,
-        namedInputs,
-        def.type,
+        filePath: item.path,
+        queryNames: names,
+        inputs: namedInputs,
+        type: def.type,
+        directOperationFragmentRefs:
+            enableFragments ? _findReferencedFragments(def).toList() : [],
+        fragmetDefs:
+            enableFragments ? fragments.map(_convertFramentDef).toList() : [],
       );
     } else {
       throw Exception(
