@@ -830,7 +830,9 @@ class Generator {
               opener: '{',
               closer: '};',
               write: (writer) {
-                writer.writeLine("'__typename': '$name',");
+                if (memberType != MemberType.inputModel) {
+                  writer.writeLine("'__typename': '$name',");
+                }
                 for (final field in fields) {
                   writer.write("'${field.name}'");
                   writer.write(': ');
