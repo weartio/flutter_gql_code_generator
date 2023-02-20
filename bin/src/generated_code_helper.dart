@@ -293,12 +293,25 @@ class FragmentFile {
   final Map<String, List<String>> refMap;
 }
 
-Iterable<String> findReferencedFragments(
+List<String> findReferencedFragments(
   List<String> refs, [
   List<FragmentDef> localFragments = const [],
   bool skipLocals = true,
-  Set<String> traversedCache = const {},
+  Set<String>? traversedCache,
+]) {
+  final result =
+      findReferencedFragmentsIterate(refs, localFragments, skipLocals, traversedCache)
+          .toList();
+  return result;
+}
+
+Iterable<String> findReferencedFragmentsIterate(
+  List<String> refs, [
+  List<FragmentDef> localFragments = const [],
+  bool skipLocals = true,
+  Set<String>? _traversedCache,
 ]) sync* {
+  final traversedCache = _traversedCache ?? <String>{};
   final found = <String>{};
   for (final ref in refs) {
     if (!found.add(ref)) {
@@ -327,9 +340,10 @@ Iterable<String> findReferencedFragments(
       if (def == null) {
         continue;
       }
+      yield def.code;
       final innerRefs = file.refMap[def.name];
       if (innerRefs != null) {
-        yield* findReferencedFragments(
+        yield* findReferencedFragmentsIterate(
           innerRefs,
           file.defs,
           false,
