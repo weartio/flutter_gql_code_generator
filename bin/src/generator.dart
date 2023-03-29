@@ -33,6 +33,7 @@ class Generator {
     required this.listFilesRecursively,
     required this.enableFieldsAlias,
     required this.enableFragments,
+    required this.mutableOutputModelFields,
   });
   late gql.DocumentNode schema;
   late Map<String, gql.TypeDefinitionNode> schemeTypeDefinitions;
@@ -44,6 +45,7 @@ class Generator {
   final bool listFilesRecursively;
   final bool enableFieldsAlias;
   final bool enableFragments;
+  final bool mutableOutputModelFields;
 
   void generate() {
     final inputDirPath = joinPath([packageDir, inputDir]);
@@ -476,10 +478,17 @@ class Generator {
     return joinPath([dir, fileName + '.dart']);
   }
 
-  String serlizerTypeMapping(gql.TypeNode type,
-      {bool addNullChecks = true, int? level}) {
-    var nullCheck =
-        (addNullChecks && type.isNullable && isNullSafety) ? '?' : '';
+  String serlizerTypeMapping(
+    gql.TypeNode type, {
+    bool addNullChecks = true,
+    int? level,
+    bool? overrideFieldNullability,
+  }) {
+    var nullCheck = (addNullChecks &&
+            (overrideFieldNullability ?? type.isNullable) &&
+            isNullSafety)
+        ? '?'
+        : '';
 
     if (type is gql.NamedTypeNode) {
       final primitive = type.asPrimitiveType();
@@ -509,12 +518,14 @@ class Generator {
 
   void _writeFieldSerializer(
     CodeWriter writer,
-    FieldInfo field,
-  ) {
+    FieldInfo field, {
+    bool? overrideFieldNullability,
+  }) {
     final type = field.type;
     writer
       ..write(fixName(field.codeGenName, MemberType.field))
-      ..write(serlizerTypeMapping(type));
+      ..write(serlizerTypeMapping(type,
+          overrideFieldNullability: overrideFieldNullability));
   }
 
   void _generateInterface(
@@ -535,7 +546,7 @@ class Generator {
         for (final field in def.fields) {
           final type = field.type;
           code
-            ..write(mapType(type))
+            ..write(mapType(type, overrideNullablity: true))
             ..write(' get ')
             ..write(fixName(field.name.value, MemberType.field))
             ..writeLine(';');
@@ -716,6 +727,11 @@ class Generator {
     final interfacesRef =
         interfaces.isEmpty ? '' : ' implements ' + interfaces.join(',');
 
+    var isConstModels = true;
+    if (memberType == MemberType.outputModel) {
+      isConstModels = !mutableOutputModelFields;
+    }
+    final ctorModifier = isConstModels ? 'const ' : '';
     writer.writeBlock(
       start: 'class $fixedName$interfacesRef',
       write: (writer) {
@@ -723,7 +739,7 @@ class Generator {
           writer.writeLine('const $fixedName();');
         } else {
           writer.writeBlock(
-            start: 'const $fixedName',
+            start: '$ctorModifier$fixedName',
             opener: '({',
             closer: '});',
             write: (writer) {
@@ -738,7 +754,7 @@ class Generator {
                       addRequired = false;
                     }
                   }
-                  if (addRequired) {
+                  if (addRequired && memberType != MemberType.outputModel) {
                     if (!isNullSafety) {
                       writer.write('@');
                     }
@@ -766,61 +782,66 @@ class Generator {
           if (isOverriden(field.name, interfaces, {})) {
             writer.writeLine('@override');
           }
+          if (isConstModels) {
+            writer.write('final ');
+          }
           writer
-            ..write('final ')
-            ..write(mapType(type))
+            ..write(mapType(type,
+                overrideNullablity:
+                    memberType == MemberType.outputModel ? true : null))
             ..write(' ')
             ..write(fixName(field.codeGenName, MemberType.field))
             ..writeLine(';');
         }
         final nullCheck = isNullSafety ? '?' : '';
-        // ===== fromDynamic : start
-        writer.writeLine();
-        writer.writeBlock(
-          start: 'static $fixedName$nullCheck fromDynamic(dynamic value)',
-          write: (writer) {
-            writer.writeLine(
-                'return fromMap(safeCast<Map<String, dynamic>>(value));');
-          },
-        );
+        if (memberType != MemberType.inputModel) {
+          // ===== fromDynamic : start
+          writer.writeLine();
+          writer.writeBlock(
+            start: 'static $fixedName$nullCheck fromDynamic(dynamic value)',
+            write: (writer) {
+              writer.writeLine(
+                  'return fromMap(safeCast<Map<String, dynamic>>(value));');
+            },
+          );
 
-        // ===== fromDynamic : end
+          // ===== fromDynamic : end
 
 //======= fromMap: Start
-        writer.writeLine();
-        const mapName = 'map';
-        writer.writeBlock(
-          start:
-              'static $fixedName$nullCheck fromMap(Map<String, dynamic>$nullCheck $mapName)',
-          write: (writer) {
-            writer.writeBlock(
-              start: 'if ($mapName == null)',
-              write: (writer) {
-                writer.writeLine('return null;');
-              },
-            );
-            writer.writeBlock(
-              start: 'return $fixedName',
-              opener: '(',
-              closer: ');',
-              write: (writer) {
-                for (final field in fields) {
-                  writer.write(fixName(field.codeGenName, MemberType.field));
-                  writer.write(': ');
-                  _writeFieldParser(
-                    writer,
-                    mapName,
-                    field,
-                  );
-                  _writeNullCheckDefaultValueIfNeeded(writer, field);
-                  writer.writeLine(',');
-                }
-              },
-            );
-          },
-        );
+          writer.writeLine();
+          const mapName = 'map';
+          writer.writeBlock(
+            start:
+                'static $fixedName$nullCheck fromMap(Map<String, dynamic>$nullCheck $mapName)',
+            write: (writer) {
+              writer.writeBlock(
+                start: 'if ($mapName == null)',
+                write: (writer) {
+                  writer.writeLine('return null;');
+                },
+              );
+              writer.writeBlock(
+                start: 'return $fixedName',
+                opener: '(',
+                closer: ');',
+                write: (writer) {
+                  for (final field in fields) {
+                    writer.write(fixName(field.codeGenName, MemberType.field));
+                    writer.write(': ');
+                    _writeFieldParser(
+                      writer,
+                      mapName,
+                      field,
+                    );
+                    //_writeNullCheckDefaultValueIfNeeded(writer, field);
+                    writer.writeLine(',');
+                  }
+                },
+              );
+            },
+          );
 //======= fromMap: End
-
+        }
         writer.writeLine();
         writer.writeBlock(
           start: 'Map<String, dynamic> toMap()',
@@ -830,14 +851,15 @@ class Generator {
               opener: '{',
               closer: '};',
               write: (writer) {
-                writer.writeLine("'__typename': '$name',");
+                if (memberType != MemberType.inputModel) {
+                  writer.writeLine("'__typename': '$name',");
+                }
                 for (final field in fields) {
                   writer.write("'${field.name}'");
                   writer.write(': ');
-                  _writeFieldSerializer(
-                    writer,
-                    field,
-                  );
+                  _writeFieldSerializer(writer, field,
+                      overrideFieldNullability:
+                          memberType == MemberType.outputModel ? true : null);
                   writer.writeLine(',');
                 }
               },
@@ -926,9 +948,10 @@ class Generator {
       ..write(')');
   }
 
-  String mapType(gql.TypeNode type, {bool addNullCheck = true}) {
-    var nullableSuffix =
-        addNullCheck && isNullSafety && type.isNullable ? '?' : '';
+  String mapType(gql.TypeNode type,
+      {bool addNullCheck = true, bool? overrideNullablity}) {
+    final isNullable = overrideNullablity ?? type.isNullable;
+    var nullableSuffix = addNullCheck && isNullSafety && isNullable ? '?' : '';
     if (type is gql.NamedTypeNode) {
       final String result;
       final name = type.name.value;

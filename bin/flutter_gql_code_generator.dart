@@ -53,6 +53,8 @@ Iterable<Generator> loadConfig() sync* {
         toBoolean(map['listFilesRecursively']?.toString() ?? '');
     final enableFieldsAlias =
         toBoolean(map['enableFieldsAlias']?.toString() ?? '');
+    final mutableOutputModelFields =
+        toBoolean(map['mutableOutputModelFields']?.toString() ?? '');
     final enableFragments = toBoolean(map['enableFragments']?.toString() ?? '');
     if ( //
         packageName == null || //
@@ -71,6 +73,7 @@ Iterable<Generator> loadConfig() sync* {
       listFilesRecursively: listFilesRecursively,
       enableFieldsAlias: enableFieldsAlias,
       enableFragments: enableFragments,
+      mutableOutputModelFields: mutableOutputModelFields,
     );
   }
 }

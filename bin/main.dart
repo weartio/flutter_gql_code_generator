@@ -12,6 +12,7 @@ void main(List<String> args) {
   parser.addFlag('listFilesRecursively', abbr: 'r');
   parser.addFlag('enableFieldsAlias', abbr: 'a');
   parser.addFlag('enableFragments', abbr: 'f');
+  parser.addFlag('mutableOutputModelFields');
 
   final results = parser.parse(args);
 
@@ -25,6 +26,8 @@ void main(List<String> args) {
   final enableFieldsAlias =
       safeCast<bool>(results['enableFieldsAlias']) ?? false;
   final enableFragments = safeCast<bool>(results['enableFragments']) ?? false;
+  final mutableOutputModelFields =
+      safeCast<bool>(results['mutableOutputModelFields']) ?? false;
   if (inputDir == null || inputDir is! String) {
     throw Exception('inputDir is mandatory');
   }
@@ -47,5 +50,6 @@ void main(List<String> args) {
     listFilesRecursively: listFilesRecursively,
     enableFieldsAlias: enableFieldsAlias,
     enableFragments: enableFragments,
+    mutableOutputModelFields: mutableOutputModelFields,
   ).generate();
 }
