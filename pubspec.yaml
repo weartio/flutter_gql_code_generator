@@ -1,6 +1,6 @@
 name: flutter_gql_code_generator
 description: Graph QL Code Generator for dart/flutter projects.
-version: 2.7.0
+version: 2.9.1
 homepage:
 
 environment:
