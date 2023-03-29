@@ -33,6 +33,7 @@ class Generator {
     required this.listFilesRecursively,
     required this.enableFieldsAlias,
     required this.enableFragments,
+    required this.mutableOutputModelFields,
   });
   late gql.DocumentNode schema;
   late Map<String, gql.TypeDefinitionNode> schemeTypeDefinitions;
@@ -44,6 +45,7 @@ class Generator {
   final bool listFilesRecursively;
   final bool enableFieldsAlias;
   final bool enableFragments;
+  final bool mutableOutputModelFields;
 
   void generate() {
     final inputDirPath = joinPath([packageDir, inputDir]);
@@ -725,6 +727,11 @@ class Generator {
     final interfacesRef =
         interfaces.isEmpty ? '' : ' implements ' + interfaces.join(',');
 
+    var isConstModels = true;
+    if (memberType == MemberType.outputModel) {
+      isConstModels = !mutableOutputModelFields;
+    }
+    final ctorModifier = isConstModels ? 'const ' : '';
     writer.writeBlock(
       start: 'class $fixedName$interfacesRef',
       write: (writer) {
@@ -732,7 +739,7 @@ class Generator {
           writer.writeLine('const $fixedName();');
         } else {
           writer.writeBlock(
-            start: 'const $fixedName',
+            start: '$ctorModifier$fixedName',
             opener: '({',
             closer: '});',
             write: (writer) {
@@ -775,8 +782,10 @@ class Generator {
           if (isOverriden(field.name, interfaces, {})) {
             writer.writeLine('@override');
           }
+          if (isConstModels) {
+            writer.write('final ');
+          }
           writer
-            ..write('final ')
             ..write(mapType(type,
                 overrideNullablity:
                     memberType == MemberType.outputModel ? true : null))
