@@ -74,7 +74,7 @@ List<T?>? Function(dynamic) arrayParser<T>(T? Function(dynamic) itemParser) {
 }
 
 
-extension NoneNullListIterable<T> on Iterable<T?> {
+extension<T> on Iterable<T?> {
   List<T> noneNullList() =>
       where((e) => e != null).map((e) => e!).toList();
 }
