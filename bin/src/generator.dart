@@ -1322,6 +1322,8 @@ class Generator {
     }
   }
 
+  // ignoring this since will be used in next sub features of the codegen tool
+  // ignore: unused_element
   void _writeNullCheckDefaultValueIfNeeded(CodeWriter writer, FieldInfo field) {
     if (isNullSafety && field.type.isNonNull) {
       final defaultValue = _getDefaultValue(field.type);

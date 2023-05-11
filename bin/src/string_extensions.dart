@@ -229,7 +229,7 @@ extension FixName on String {
         (c3.contains(this) && target == FixNameTarget.memberDecl);
 
     if (needEscaping) {
-      return '${this}${target.keywordEscapeSuffix}';
+      return '$this${target.keywordEscapeSuffix}';
     }
     return this;
   }
