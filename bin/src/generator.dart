@@ -895,7 +895,11 @@ class Generator {
       }
     } else if (type is gql.ListTypeNode) {
       final element = getTypeParser(type.type);
-      return 'arrayParser($element)';
+      if (type.type.isNullable) {
+        return 'arrayParser($element)';
+      } else {
+        return 'arrayParserNoneNull($element)';
+      }
     } else {
       throw Exception('Un supported type ${type.runtimeType}');
     }

@@ -73,6 +73,18 @@ List<T?>? Function(dynamic) arrayParser<T>(T? Function(dynamic) itemParser) {
       safeCast<List<dynamic>>(item)?.map(itemParser).toList();
 }
 
+
+extension NoneNullListIterable<T> on Iterable<T?> {
+  List<T> noneNullList() =>
+      where((e) => e != null).map((e) => e!).toList();
+}
+
+List<T>? Function(dynamic) arrayParserNoneNull<T>(
+    T? Function(dynamic) itemParser) {
+  return (dynamic item) =>
+      safeCast<List<dynamic>>(item)?.map(itemParser).noneNullList();
+}
+
 T? safeCast<T>(dynamic value) {
   if (value is T) {
     return value;
