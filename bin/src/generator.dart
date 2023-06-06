@@ -540,14 +540,21 @@ class Generator {
         .toList();
     final interfacesRef =
         interfacesList.isEmpty ? '' : ' implements ' + interfacesList.join(',');
+
+    _addDeprecation(code, def.directives);
+
     code.writeBlock(
       start: 'abstract class $name$interfacesRef',
       write: (code) {
         for (final field in def.fields) {
+          _addDeprecation(code, field.directives);
+
           final type = field.type;
+          code.write(mapType(type, overrideNullablity: true));
+          if (!mutableOutputModelFields) {
+            code.write(' get ');
+          }
           code
-            ..write(mapType(type, overrideNullablity: true))
-            ..write(' get ')
             ..write(fixName(field.name.value, MemberType.field))
             ..writeLine(';');
         }
@@ -713,13 +720,38 @@ class Generator {
     File(path).writeAsStringSync(codeBody);
   }
 
+  void _addDeprecation(CodeWriter writer, List<gql.DirectiveNode> directives) {
+    final deprecated = _findDeprecationReason(directives);
+    if (deprecated != null) {
+      if (deprecated.isEmpty) {
+        writer.writeLine('@deprecated');
+      } else {
+        final reason = deprecated.escapeText(singleLine: false);
+        writer.writeLine("@Deprecated('$reason')");
+      }
+    }
+  }
+
+  void _addMultiDeprecation(
+      CodeWriter writer, Map<String, List<gql.DirectiveNode>> directives) {
+    final deps = directives
+        .map((key, value) => MapEntry(key, _findDeprecationReason(value)));
+    deps.removeWhere((key, value) => value == null);
+    if (deps.isEmpty) {
+      return;
+    }
+    for (final entry in deps.entries) {
+      writer.writeLine("@Deprecated('${entry.key}:${entry.value}')");
+    }
+  }
+
   void generateClass(
-    String outputPath,
-    String name,
-    List<FieldInfo> fields,
-    List<String> interfaces,
-    MemberType memberType,
-  ) {
+      String outputPath,
+      String name,
+      List<FieldInfo> fields,
+      List<String> interfaces,
+      MemberType memberType,
+      List<gql.DirectiveNode> directives) {
     final writer = CodeWriter();
     final fixedName = fixName(name, memberType);
     writeImports(writer);
@@ -732,6 +764,8 @@ class Generator {
       isConstModels = !mutableOutputModelFields;
     }
     final ctorModifier = isConstModels ? 'const ' : '';
+
+    _addDeprecation(writer, directives);
     writer.writeBlock(
       start: 'class $fixedName$interfacesRef',
       write: (writer) {
@@ -785,6 +819,7 @@ class Generator {
           if (isConstModels) {
             writer.write('final ');
           }
+
           writer
             ..write(mapType(type,
                 overrideNullablity:
@@ -1006,10 +1041,33 @@ class Generator {
     if (!enableFieldsAlias) {
       return null;
     }
+    return findDirectiveValue(
+      directives,
+      directiveName: 'custom_alias',
+      directiveArgName: 'name',
+    );
+  }
+
+  String? _findDeprecationReason(List<gql.DirectiveNode> directives) {
+    if (!enableFieldsAlias) {
+      return null;
+    }
+    return findDirectiveValue(
+      directives,
+      directiveName: 'deprecated',
+      directiveArgName: 'reason',
+    );
+  }
+
+  String? findDirectiveValue(
+    List<gql.DirectiveNode> directives, {
+    required String directiveName,
+    required String directiveArgName,
+  }) {
     return safeCast<gql.StringValueNode>(directives
-            .firstWhereOrNull((e) => e.name.value == 'custom_alias')
+            .firstWhereOrNull((e) => e.name.value == directiveName)
             ?.arguments
-            .firstWhereOrNull((e) => e.name.value == 'name')
+            .firstWhereOrNull((e) => e.name.value == directiveArgName)
             ?.value)
         ?.value;
   }
@@ -1035,6 +1093,7 @@ class Generator {
             .toList(),
         def.interfaces.map((e) => e.name.value).toList(),
         def.memberType,
+        def.directives,
       );
     } else if (def is gql.InputObjectTypeDefinitionNode) {
       generateClass(
@@ -1055,6 +1114,7 @@ class Generator {
             .toList(),
         [],
         def.memberType,
+        def.directives,
       );
     } else if (def is gql.EnumTypeDefinitionNode) {
       _generateEnum(path, def);
@@ -1072,19 +1132,19 @@ class Generator {
       String resultName, Map<String, TypeInfo> subTypes) {
     final path = getDefPathForResolvedType(resultName, 'AggregateOutputModels');
     generateClass(
-      path,
-      resultName,
-      subTypes.entries
-          .map(
-            (e) => FieldInfo(
-              name: e.key,
-              type: e.value.type,
-            ),
-          )
-          .toList(),
-      [],
-      MemberType.outputModel,
-    );
+        path,
+        resultName,
+        subTypes.entries
+            .map(
+              (e) => FieldInfo(
+                name: e.key,
+                type: e.value.type,
+              ),
+            )
+            .toList(),
+        [],
+        MemberType.outputModel,
+        []);
   }
 
   String getRelativeSubDirPath(String itemPath, String parentPath) {
@@ -1131,6 +1191,7 @@ class Generator {
       outputName = '$name?';
       typeParser = '$name.fromDynamic';
     }
+    _addMultiDeprecation(code, operation.directivesMap);
 
     code.writeBlock(
       start: 'class $fileName implements BaseRequest<$noneNullOutputName>',
@@ -1168,6 +1229,7 @@ class Generator {
         for (final field in operation.inputs) {
           final fieldType = field.type;
           final type = mapType(fieldType);
+          _addDeprecation(code, field.directives);
           code.write('final ');
           code.write(type);
           code.write(' ');
@@ -1183,29 +1245,46 @@ class Generator {
 
         code.writeLine();
         final externalRefs = operation.directOperationFragmentRefsExternal;
+
         if (!enableFragments || externalRefs.isEmpty) {
           code.writeLine('@override');
-          code.writeLine("String get operation => r'''");
+          code.writeLine('String get operation => _generateOperationCode();');
         } else {
-          code.writeLine('static String? _operationCached;');
-          code.writeLine('@override');
-          code.writeLine("String get operation => _operationCached ??= r'''");
+          code
+            ..writeLine('static String? _operationCached;')
+            ..writeLine('@override')
+            ..writeLine('String get operation => isDebugMode //')
+            ..writeLine('? _generateOperationCode() //')
+            ..writeLine(': _operationCached ??= _generateOperationCode();');
         }
-        final formatted = reformatGQLFile(operation.filePath);
-        code.write(formatted.escapeText(singleLine: false), addTabs: false);
-        code.writeLine('');
-        if (!enableFragments || externalRefs.isEmpty) {
-          code.writeLine("''';");
-        } else {
-          code.writeLine("\n''' + findReferencedFragments([" +
-              externalRefs.map((e) => "'$e'").join(',') +
-              r"]).join('\n');");
-        }
+        code.writeBlock(
+          start: 'String _generateOperationCode()',
+          write: (code) {
+            if (enableFragments && externalRefs.isNotEmpty) {
+              code.writeLine('final refs = findReferencedFragments([');
+              code.writeLine(externalRefs.map((e) => "'$e'").join(','));
+              code.writeLine(r',],);');
+              code.writeLine();
+            }
+            code.writeLine("return r'''");
+            final formatted = reformatGQLFile(operation.filePath);
+            code.write(
+              formatted.escapeText(singleLine: false).trim(),
+              addTabs: false,
+            );
+            code.writeLine();
+            if (enableFragments && externalRefs.isNotEmpty) {
+              code.writeLine("''' + refs" r".join('\n');");
+            } else {
+              code.writeLine("''';");
+            }
+          },
+        );
 
         code.writeLine();
         code.writeLine('@override');
         code.writeBlock(
-          start: 'Map<String, dynamic> get inputs => <String, dynamic>',
+          start: 'Map<String, dynamic> get inputs => //\n<String, dynamic>',
           opener: '{',
           closer: '};',
           write: (code) {
@@ -1283,11 +1362,11 @@ class Generator {
       for (final input in inputs) {
         final name = input.variable.name.value;
         final type = input.type;
-
         namedInputs.add(
           QueryInput(
             name: name,
             type: type,
+            directives: input.directives,
             defaultValue: _mapDefaultValue(
               input.defaultValue?.value,
               type,
@@ -1297,9 +1376,11 @@ class Generator {
       }
 
       final names = <String>[];
+      final directivesMap = <String, List<gql.DirectiveNode>>{};
       for (final selectedQuery in def.selectionSet.selections) {
         if (selectedQuery is gql.FieldNode) {
           final name = selectedQuery.name.value;
+          directivesMap[name] = selectedQuery.directives;
           names.add(name);
         } else {
           throw Exception(
@@ -1315,6 +1396,7 @@ class Generator {
             enableFragments ? _findReferencedFragments(def).toList() : [],
         fragmetDefs:
             enableFragments ? fragments.map(_convertFramentDef).toList() : [],
+        directivesMap: directivesMap,
       );
     } else {
       throw Exception(

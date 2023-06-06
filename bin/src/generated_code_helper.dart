@@ -3,6 +3,8 @@ String get generatedCodeHelper {
 import 'dart:convert';
 import 'fragment_defs.dart';
 
+var isDebugMode = false;
+
 extension MapParserHelper on Map<String, dynamic> {
   T? tryParse<T>(String name, T? Function(dynamic) parser) {
     final dynamic value = this[name];

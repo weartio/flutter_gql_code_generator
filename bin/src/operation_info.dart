@@ -13,11 +13,13 @@ class OperationInfo {
     required this.type,
     required this.fragmetDefs,
     required this.directOperationFragmentRefs,
+    required this.directivesMap,
   });
   final String filePath;
   final List<String> queryNames;
   final List<QueryInput> inputs;
   final gql.OperationType type;
+  final Map<String, List<gql.DirectiveNode>> directivesMap;
   MemberType get memberType {
     switch (type) {
       case gql.OperationType.query:
