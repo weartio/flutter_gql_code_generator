@@ -189,6 +189,12 @@ class GraphQLException implements Exception {
   const GraphQLException(this.message, this.errors);
   final String message;
   final List<GraphQLError> errors;
+
+  @override
+  String toString() {
+    final errorsString = jsonEncode(errors.map((e) => e.raw).toList());
+    return 'GraphQLException: $errorsString';
+  }  
 }
 
 class GraphQLError {
